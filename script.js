@@ -2,44 +2,34 @@
 const SUPABASE_URL = 'https://gqlxktuqmtgpixmbcefp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxbHhrdHVxbXRncGl4bWJjZWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk2MTksImV4cCI6MjA5MDE3NTYxOX0.SEbaQaYFRIMhrTGK--XY-YEHG5v5LUdU6__gv8Qi8rE';
 
+// Inisialisasi Supabase
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentUserLanguage = 'id';
-let currentRoomId = 'public';
-let typingTimeout = null;
-let messagesSubscription = null;
-let onlineStatusInterval = null;
 
-// ============ FUNGSI BANTUAN ============
-function detectLanguage(text) {
-    if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) return 'ja';
-    if (/^[a-zA-Z\s\.,!?0-9]+$/.test(text)) return 'en';
-    return 'id';
-}
-
+// Fungsi terjemahan
 async function translateText(text, targetLang) {
-    if (!text || !targetLang) return text;
-    const sourceLang = detectLanguage(text);
-    if (sourceLang === targetLang) return text;
+    if (!text || !targetLang || targetLang === 'id') return text;
     
     try {
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
+        
         if (data.responseData && data.responseData.translatedText) {
-            let translated = data.responseData.translatedText;
-            if (translated.includes('INVALID') || translated.includes('NO CONTENT')) return text;
-            return translated;
+            return data.responseData.translatedText;
         }
         return text;
     } catch (error) {
+        console.error('Translation error:', error);
         return text;
     }
 }
 
 function formatTime(timestamp) {
-    return new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
@@ -48,57 +38,32 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function playNotificationSound() {
-    const audio = document.getElementById('notification-sound');
-    if (audio) audio.play().catch(e => console.log('Audio play failed'));
-}
-
-// ============ AMBIL PROFIL USER ============
-async function getProfile(userId) {
-    const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-    if (error) return null;
-    return data;
-}
-
-// ============ RENDER PESAN ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
     
-    const isOwnMessage = message.user_id === currentUser?.id;
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
+    messageDiv.className = `message ${message.user_id === currentUser?.id ? 'message-own' : 'message-other'}`;
     messageDiv.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    if (!isOwnMessage) {
+    if (message.user_id !== currentUser?.id && currentUserLanguage !== 'id') {
         const translated = await translateText(message.original_message, currentUserLanguage);
-        if (translated !== message.original_message) {
-            displayText = translated;
-            showOriginal = true;
-        }
+        displayText = translated;
+        showOriginal = true;
     }
     
-    const avatarUrl = message.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
-    
     messageDiv.innerHTML = `
-        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='https://ui-avatars.com/api/?background=667eea&color=fff&size=40'">
-        <div class="message-content-wrapper">
-            <div class="message-bubble">
-                <div class="message-header">
-                    <span class="username">${escapeHtml(message.username)}</span>
-                    <span class="time">${formatTime(message.created_at)}</span>
-                </div>
-                <div class="message-content">${escapeHtml(displayText)}</div>
-                ${message.image_url ? `<img class="message-image" src="${message.image_url}" alt="image">` : ''}
-                ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+        <div class="message-bubble">
+            <div class="message-header">
+                <span class="username">${escapeHtml(message.username)}</span>
+                <span class="time">${formatTime(message.created_at)}</span>
             </div>
+            <div class="message-content">${escapeHtml(displayText)}</div>
+            ${showOriginal && displayText !== message.original_message ? 
+                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
@@ -106,7 +71,6 @@ async function renderMessage(message) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-// ============ LOAD MESSAGES ============
 async function loadMessages() {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -116,11 +80,11 @@ async function loadMessages() {
     const { data: messages, error } = await supabaseClient
         .from('messages')
         .select('*')
-        .eq('room_id', currentRoomId)
         .order('created_at', { ascending: true })
         .limit(100);
     
     if (error) {
+        console.error('Error loading messages:', error);
         messagesContainer.innerHTML = '<div class="loading-messages">Error loading messages</div>';
         return;
     }
@@ -131,159 +95,80 @@ async function loadMessages() {
     }
 }
 
-// ============ SEND MESSAGE ============
-async function sendMessage(messageText, imageUrl = null) {
-    if ((!messageText.trim() && !imageUrl) || !currentUser) return;
-    
-    const profile = await getProfile(currentUser.id);
+async function sendMessage(messageText) {
+    if (!messageText.trim() || !currentUser) return;
     
     const messageData = {
         user_id: currentUser.id,
-        username: profile?.username || currentUser.email.split('@')[0],
-        original_message: messageText.trim() || '',
-        room_id: currentRoomId,
-        image_url: imageUrl,
-        avatar_url: profile?.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40'
+        username: currentUser.user_metadata?.display_name || currentUser.email.split('@')[0],
+        original_message: messageText.trim()
     };
     
     const { error } = await supabaseClient.from('messages').insert([messageData]);
-    if (error) alert('Gagal mengirim pesan: ' + error.message);
-}
-
-// ============ UPLOAD GAMBAR ============
-async function uploadImage(file) {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `chat-images/${fileName}`;
-    
-    const { error } = await supabaseClient.storage
-        .from('chat-images')
-        .upload(filePath, file);
-    
     if (error) {
-        alert('Gagal upload: ' + error.message);
-        return null;
+        console.error('Error sending message:', error);
+        alert('Gagal mengirim pesan: ' + error.message);
     }
-    
-    const { data } = supabaseClient.storage.from('chat-images').getPublicUrl(filePath);
-    return data.publicUrl;
 }
 
-// ============ LOAD USER LIST (DARI PROFILES) ============
-async function loadUserList() {
-    const userList = document.getElementById('user-list');
-    if (!userList) return;
-    
-    const { data: profiles, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .neq('id', currentUser?.id);
-    
-    if (error) {
-        console.error('Error:', error);
-        return;
-    }
-    
-    userList.innerHTML = '';
-    profiles.forEach(profile => {
-        const userDiv = document.createElement('div');
-        userDiv.className = 'user-item';
-        userDiv.onclick = () => {
-            currentRoomId = `private_${[currentUser.id, profile.id].sort().join('_')}`;
-            document.getElementById('chat-room-name').innerText = `Chat with ${profile.username}`;
-            loadMessages();
-        };
-        userDiv.innerHTML = `
-            <img class="user-avatar-small" src="${profile.avatar_url}" alt="avatar" onerror="this.src='https://ui-avatars.com/api/?background=667eea&color=fff&size=40'">
-            <div class="user-info-sidebar">
-                <div class="user-name">${escapeHtml(profile.username)}</div>
-                <div class="user-status ${profile.online ? 'online' : 'offline'}">${profile.online ? 'Online' : 'Offline'}</div>
-            </div>
-        `;
-        userList.appendChild(userDiv);
-    });
-}
+let messagesSubscription = null;
 
-// ============ UPDATE ONLINE STATUS ============
-async function updateOnlineStatus() {
-    if (!currentUser) return;
-    await supabaseClient
-        .from('profiles')
-        .update({ online: true, last_seen: new Date().toISOString() })
-        .eq('id', currentUser.id);
-}
-
-// ============ REALTIME SUBSCRIPTION ============
 function setupRealtimeSubscription() {
-    if (messagesSubscription) messagesSubscription.unsubscribe();
+    if (messagesSubscription) {
+        messagesSubscription.unsubscribe();
+    }
     
     messagesSubscription = supabaseClient
         .channel('messages-channel')
         .on('postgres_changes', 
             { event: 'INSERT', schema: 'public', table: 'messages' },
             async (payload) => {
-                if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) {
-                    playNotificationSound();
-                }
-                if (payload.new.room_id === currentRoomId) {
-                    await renderMessage(payload.new);
-                }
+                await renderMessage(payload.new);
             }
         )
         .subscribe();
 }
 
-// ============ AUTH FUNCTIONS ============
 async function handleLogin(email, password) {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: email,
+        password: password
+    });
+    
     if (error) {
         alert('Login gagal: ' + error.message);
         return false;
     }
     
     currentUser = data.user;
-    const profile = await getProfile(currentUser.id);
-    currentUserLanguage = profile?.preferred_language || 'id';
+    currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
     
-    document.getElementById('user-language').value = currentUserLanguage;
-    document.getElementById('current-username').textContent = profile?.username || currentUser.email.split('@')[0];
-    document.getElementById('current-avatar').src = profile?.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
-    document.getElementById('auth-container').style.display = 'none';
-    document.getElementById('chat-container').style.display = 'flex';
+    const userLanguageSelect = document.getElementById('user-language');
+    if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
     
-    await loadUserList();
+    const authContainer = document.getElementById('auth-container');
+    const chatContainer = document.getElementById('chat-container');
+    const currentUsername = document.getElementById('current-username');
+    
+    if (authContainer) authContainer.style.display = 'none';
+    if (chatContainer) chatContainer.style.display = 'flex';
+    if (currentUsername) {
+        currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    }
+    
     await loadMessages();
     setupRealtimeSubscription();
-    updateOnlineStatus();
-    setInterval(updateOnlineStatus, 30000);
     return true;
 }
 
-async function handleRegister(username, email, password, language, avatarFile) {
-    let avatarUrl = 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
-    
-    if (avatarFile) {
-        const fileExt = avatarFile.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `avatars/${fileName}`;
-        
-        const { error } = await supabaseClient.storage
-            .from('avatars')
-            .upload(filePath, avatarFile);
-        
-        if (!error) {
-            const { data } = supabaseClient.storage.from('avatars').getPublicUrl(filePath);
-            avatarUrl = data.publicUrl;
-        }
-    }
-    
-    const { error } = await supabaseClient.auth.signUp({
-        email, password,
+async function handleRegister(username, email, password, language) {
+    const { data, error } = await supabaseClient.auth.signUp({
+        email: email,
+        password: password,
         options: {
             data: {
                 display_name: username,
-                preferred_language: language,
-                avatar_url: avatarUrl
+                preferred_language: language
             }
         }
     });
@@ -298,113 +183,157 @@ async function handleRegister(username, email, password, language, avatarFile) {
 }
 
 async function handleLogout() {
-    await supabaseClient
-        .from('profiles')
-        .update({ online: false })
-        .eq('id', currentUser.id);
-    
     await supabaseClient.auth.signOut();
     currentUser = null;
-    if (messagesSubscription) messagesSubscription.unsubscribe();
+    if (messagesSubscription) {
+        messagesSubscription.unsubscribe();
+    }
     
-    document.getElementById('auth-container').style.display = 'flex';
-    document.getElementById('chat-container').style.display = 'none';
+    const authContainer = document.getElementById('auth-container');
+    const chatContainer = document.getElementById('chat-container');
+    
+    if (authContainer) authContainer.style.display = 'flex';
+    if (chatContainer) chatContainer.style.display = 'none';
 }
 
-// ============ EVENT LISTENERS ============
+// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded, setting up event listeners...');
+    
     // Tab switching
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById('login-form').classList.toggle('active', btn.dataset.tab === 'login');
-            document.getElementById('register-form').classList.toggle('active', btn.dataset.tab === 'register');
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    
+    if (tabBtns.length > 0) {
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                if (btn.dataset.tab === 'login') {
+                    if (loginForm) loginForm.classList.add('active');
+                    if (registerForm) registerForm.classList.remove('active');
+                } else {
+                    if (loginForm) loginForm.classList.remove('active');
+                    if (registerForm) registerForm.classList.add('active');
+                }
+            });
         });
-    });
+    }
     
-    // Login
-    document.getElementById('login-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await handleLogin(
-            document.getElementById('login-email').value,
-            document.getElementById('login-password').value
-        );
-    });
+    // Login form
+    const loginSubmitBtn = document.getElementById('login-form');
+    if (loginSubmitBtn) {
+        loginSubmitBtn.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('Login form submitted');
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            await handleLogin(email, password);
+        });
+    }
     
-    // Register
-    document.getElementById('register-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const password = document.getElementById('register-password').value;
-        if (password.length < 6) {
-            alert('Password minimal 6 karakter');
-            return;
-        }
-        await handleRegister(
-            document.getElementById('register-username').value,
-            document.getElementById('register-email').value,
-            password,
-            document.getElementById('register-language').value,
-            document.getElementById('register-avatar').files[0]
-        );
-    });
+    // Register form
+    const registerSubmitBtn = document.getElementById('register-form');
+    if (registerSubmitBtn) {
+        registerSubmitBtn.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('Register form submitted');
+            const username = document.getElementById('register-username').value;
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const language = document.getElementById('register-language').value;
+            
+            if (password.length < 6) {
+                alert('Password minimal 6 karakter');
+                return;
+            }
+            
+            await handleRegister(username, email, password, language);
+        });
+    } else {
+        console.error('Register form not found!');
+    }
     
     // Send message
-    document.getElementById('send-btn').addEventListener('click', async () => {
-        const input = document.getElementById('message-input');
-        await sendMessage(input.value);
-        input.value = '';
-    });
+    const sendBtn = document.getElementById('send-btn');
+    const messageInput = document.getElementById('message-input');
     
-    document.getElementById('message-input').addEventListener('keypress', async (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            const input = document.getElementById('message-input');
-            await sendMessage(input.value);
-            input.value = '';
-        }
-    });
+    if (sendBtn) {
+        sendBtn.addEventListener('click', () => {
+            if (messageInput) {
+                sendMessage(messageInput.value);
+                messageInput.value = '';
+            }
+        });
+    }
+    
+    if (messageInput) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(messageInput.value);
+                messageInput.value = '';
+            }
+        });
+    }
     
     // Logout
-    document.getElementById('logout-btn').addEventListener('click', handleLogout);
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
     
     // Language change
-    document.getElementById('user-language').addEventListener('change', async (e) => {
-        currentUserLanguage = e.target.value;
-        if (currentUser) {
-            await supabaseClient
-                .from('profiles')
-                .update({ preferred_language: currentUserLanguage })
-                .eq('id', currentUser.id);
-            loadMessages();
-        }
-    });
+    const userLanguage = document.getElementById('user-language');
+    if (userLanguage) {
+        userLanguage.addEventListener('change', async (e) => {
+            currentUserLanguage = e.target.value;
+            if (currentUser) {
+                await supabaseClient.auth.updateUser({
+                    data: { preferred_language: currentUserLanguage }
+                });
+                // Refresh messages
+                const messagesContainer = document.getElementById('messages-container');
+                if (messagesContainer) {
+                    const messages = messagesContainer.children;
+                    for (let i = 0; i < messages.length; i++) {
+                        const msgDiv = messages[i];
+                        const msgId = msgDiv.getAttribute('data-message-id');
+                        if (msgId) {
+                            const { data: msg } = await supabaseClient.from('messages').select('*').eq('id', msgId).single();
+                            if (msg) {
+                                const newDiv = document.createElement('div');
+                                msgDiv.parentNode.replaceChild(newDiv, msgDiv);
+                                await renderMessage(msg);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
     
-    // Upload image
-    document.getElementById('attach-btn').addEventListener('click', () => {
-        document.getElementById('image-upload').click();
-    });
-    
-    document.getElementById('image-upload').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const imageUrl = await uploadImage(file);
-            if (imageUrl) await sendMessage('', imageUrl);
-        }
-        e.target.value = '';
-    });
-    
-    // Back to public chat
-    document.getElementById('new-chat-btn').addEventListener('click', () => {
-        currentRoomId = 'public';
-        document.getElementById('chat-room-name').innerText = 'Public Chat';
-        loadMessages();
-    });
-    
-    // Check existing session
+    // Cek session yang ada
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
-            handleLogin(session.user.email, '');
+            currentUser = session.user;
+            currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
+            const authContainer = document.getElementById('auth-container');
+            const chatContainer = document.getElementById('chat-container');
+            const currentUsername = document.getElementById('current-username');
+            const userLanguageSelect = document.getElementById('user-language');
+            
+            if (authContainer) authContainer.style.display = 'none';
+            if (chatContainer) chatContainer.style.display = 'flex';
+            if (currentUsername) {
+                currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+            }
+            if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
+            
+            loadMessages();
+            setupRealtimeSubscription();
         }
     });
 });
