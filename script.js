@@ -9,6 +9,8 @@ let currentUser = null;
 let currentUserLanguage = 'id';
 let soundEnabled = true;
 let activeAction = null; // 'delete' atau 'revoke'
+let onlineStatusInterval = null;
+let currentMood = '😊';
 
 // ============ SELECT MODE VARIABLES ============
 let selectMode = false;
@@ -57,7 +59,6 @@ function showNotificationToast(message) {
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     
-    // Mapping bahasa untuk Lingva
     const langMap = {
         'id': 'id',
         'ja': 'ja',
@@ -68,7 +69,6 @@ async function translateText(text, targetLang) {
     const target = langMap[targetLang] || targetLang;
     
     try {
-        // Gunakan Lingva Translate (free, unlimited)
         const url = `https://lingva.ml/api/v1/auto/${target}/${encodeURIComponent(text)}`;
         const response = await fetch(url);
         const data = await response.json();
@@ -92,6 +92,74 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============ GET PROFILE ============
+async function getProfile(userId) {
+    const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+    if (error) return null;
+    return data;
+}
+
+// ============ UPDATE ONLINE STATUS ============
+async function updateOnlineStatus() {
+    if (!currentUser) return;
+    
+    await supabaseClient
+        .from('profiles')
+        .update({ 
+            online: true, 
+            last_seen: new Date().toISOString() 
+        })
+        .eq('id', currentUser.id);
+}
+
+async function setUserOffline() {
+    if (!currentUser) return;
+    
+    await supabaseClient
+        .from('profiles')
+        .update({ online: false })
+        .eq('id', currentUser.id);
+}
+
+function startOnlineStatusTracking() {
+    if (onlineStatusInterval) clearInterval(onlineStatusInterval);
+    updateOnlineStatus();
+    onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
+}
+
+// ============ MOOD STATUS ============
+async function loadUserMood() {
+    if (!currentUser) return;
+    
+    const profile = await getProfile(currentUser.id);
+    if (profile && profile.mood) {
+        currentMood = profile.mood;
+        const userMoodSpan = document.getElementById('user-mood');
+        if (userMoodSpan) userMoodSpan.textContent = currentMood;
+    }
+}
+
+async function updateMood(mood) {
+    if (!currentUser) return;
+    
+    currentMood = mood;
+    const userMoodSpan = document.getElementById('user-mood');
+    if (userMoodSpan) userMoodSpan.textContent = mood;
+    
+    const { error } = await supabaseClient
+        .from('profiles')
+        .update({ mood: mood })
+        .eq('id', currentUser.id);
+    
+    if (error) {
+        console.error('Error updating mood:', error);
+    }
 }
 
 // ============ EMOJI PICKER FUNCTION ============
@@ -148,7 +216,6 @@ function toggleMessageSelection(messageId, element) {
         element.classList.add('selected');
     }
     
-    // Update counter di modal
     const selectedCountSpan = document.getElementById('selected-count');
     const revokeSelectedSpan = document.getElementById('revoke-selected-count');
     if (selectedCountSpan) selectedCountSpan.textContent = selectedMessages.size;
@@ -249,7 +316,6 @@ async function renderMessage(message) {
         </div>
     `;
     
-    // Event click untuk select mode
     messageDiv.addEventListener('click', (e) => {
         if (selectMode) {
             e.stopPropagation();
@@ -285,11 +351,10 @@ async function loadMessages() {
     }
 }
 
-// ============ SEND MESSAGE (DENGAN USERNAME TERBARU) ============
+// ============ SEND MESSAGE ============
 async function sendMessage(messageText) {
     if (!messageText.trim() || !currentUser) return;
     
-    // Ambil username terbaru langsung dari user_metadata
     const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
     
     const messageData = {
@@ -329,13 +394,12 @@ function setupRealtimeSubscription() {
         .subscribe();
 }
 
-// ============ SELECT MODE START FUNCTIONS (DENGAN TOMBOL SELESAI) ============
+// ============ SELECT MODE START FUNCTIONS ============
 function startSelectMode(action) {
     selectMode = true;
     selectedMessages.clear();
     activeAction = action;
     
-    // Tambah header select mode dengan tombol SELESAI
     const header = document.createElement('div');
     header.id = 'select-mode-header';
     header.className = 'select-mode-header';
@@ -351,14 +415,12 @@ function startSelectMode(action) {
         container.prepend(header);
     }
     
-    // Tambah class select-mode ke semua pesan
     const messages = document.querySelectorAll('.message');
     messages.forEach(msg => {
         msg.classList.add('select-mode');
         msg.style.cursor = 'pointer';
     });
     
-    // Tombol close (X)
     const closeBtn = document.getElementById('close-select-mode');
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
@@ -366,7 +428,6 @@ function startSelectMode(action) {
         });
     }
     
-    // TOMBOL SELESAI - munculkan modal
     const doneBtn = document.getElementById('done-select-mode');
     if (doneBtn) {
         doneBtn.addEventListener('click', () => {
@@ -390,18 +451,15 @@ const saveProfileBtn = document.getElementById('save-profile-btn');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editProfileMessage = document.getElementById('edit-profile-message');
 
-// Buka modal edit profil
 function openEditProfileModal() {
     if (!currentUser) return;
     
-    // Isi input dengan username saat ini
     const currentUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
     if (editUsernameInput) editUsernameInput.value = currentUsername;
     if (editProfileMessage) editProfileMessage.textContent = '';
     if (editProfileModal) editProfileModal.style.display = 'flex';
 }
 
-// Simpan perubahan username
 async function saveProfileChanges() {
     const newUsername = editUsernameInput?.value.trim();
     
@@ -415,7 +473,6 @@ async function saveProfileChanges() {
         return;
     }
     
-    // Update di Supabase Auth
     const { error } = await supabaseClient.auth.updateUser({
         data: {
             display_name: newUsername
@@ -427,11 +484,9 @@ async function saveProfileChanges() {
         return;
     }
     
-    // Update tampilan username di header
     const currentUsernameSpan = document.getElementById('current-username');
     if (currentUsernameSpan) currentUsernameSpan.textContent = newUsername;
     
-    // UPDATE SEMUA PESAN LAMA DENGAN USERNAME BARU
     await updateAllMessagesUsername();
     
     if (editProfileMessage) {
@@ -439,13 +494,11 @@ async function saveProfileChanges() {
         editProfileMessage.style.color = '#10b981';
     }
     
-    // Tutup modal setelah 1.5 detik
     setTimeout(() => {
         if (editProfileModal) editProfileModal.style.display = 'none';
     }, 1500);
 }
 
-// Tutup modal
 function closeEditProfileModal() {
     if (editProfileModal) editProfileModal.style.display = 'none';
     if (editProfileMessage) editProfileMessage.textContent = '';
@@ -479,10 +532,11 @@ async function handleLogin(email, password) {
         currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
     }
     
+    await loadUserMood();
     await loadMessages();
-    // Update semua pesan lama dengan username terbaru (jika ada perubahan)
     await updateAllMessagesUsername();
     setupRealtimeSubscription();
+    startOnlineStatusTracking();
     return true;
 }
 
@@ -508,8 +562,10 @@ async function handleRegister(username, email, password, language) {
 }
 
 async function handleLogout() {
+    await setUserOffline();
     await supabaseClient.auth.signOut();
     currentUser = null;
+    if (onlineStatusInterval) clearInterval(onlineStatusInterval);
     if (messagesSubscription) {
         messagesSubscription.unsubscribe();
     }
@@ -525,7 +581,6 @@ async function handleLogout() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up event listeners...');
     
-    // Load voices untuk Web Speech API
     if ('speechSynthesis' in window) {
         window.speechSynthesis.getVoices();
     }
@@ -650,11 +705,44 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelEditBtn.addEventListener('click', closeEditProfileModal);
     }
     
-    // Tutup modal edit profil klik overlay
     if (editProfileModal) {
         editProfileModal.addEventListener('click', (e) => {
             if (e.target === editProfileModal) {
                 closeEditProfileModal();
+            }
+        });
+    }
+    
+    // ============ MOOD MODAL ============
+    const moodModal = document.getElementById('mood-modal');
+    const moodOptions = document.querySelectorAll('.mood-option');
+    const closeMoodModal = document.getElementById('close-mood-modal');
+    const userMoodSpan = document.getElementById('user-mood');
+    
+    if (userMoodSpan) {
+        userMoodSpan.addEventListener('click', () => {
+            if (moodModal) moodModal.style.display = 'flex';
+        });
+    }
+    
+    moodOptions.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const mood = btn.dataset.mood;
+            await updateMood(mood);
+            if (moodModal) moodModal.style.display = 'none';
+        });
+    });
+    
+    if (closeMoodModal) {
+        closeMoodModal.addEventListener('click', () => {
+            if (moodModal) moodModal.style.display = 'none';
+        });
+    }
+    
+    if (moodModal) {
+        moodModal.addEventListener('click', (e) => {
+            if (e.target === moodModal) {
+                moodModal.style.display = 'none';
             }
         });
     }
@@ -695,7 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // ============ FAB BUTTON EVENTS (DELETE & REVOKE) ============
+    // ============ FAB BUTTON EVENTS ============
     const fabBtn = document.getElementById('fab-btn');
     const fabMenu = document.getElementById('fab-menu');
     const fabDelete = document.getElementById('fab-delete');
@@ -707,7 +795,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelDelete = document.getElementById('cancel-delete');
     const cancelRevoke = document.getElementById('cancel-revoke');
     
-    // Toggle menu
     if (fabBtn && fabMenu) {
         fabBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -721,7 +808,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Delete option
     if (fabDelete) {
         fabDelete.addEventListener('click', () => {
             if (fabMenu) fabMenu.classList.remove('show');
@@ -729,7 +815,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Revoke option
     if (fabRevoke) {
         fabRevoke.addEventListener('click', () => {
             if (fabMenu) fabMenu.classList.remove('show');
@@ -737,7 +822,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Confirm Delete
     if (confirmDelete) {
         confirmDelete.addEventListener('click', async () => {
             if (deleteModal) deleteModal.style.display = 'none';
@@ -745,7 +829,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Confirm Revoke
     if (confirmRevoke) {
         confirmRevoke.addEventListener('click', async () => {
             if (revokeModal) revokeModal.style.display = 'none';
@@ -753,7 +836,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Cancel buttons
     if (cancelDelete) {
         cancelDelete.addEventListener('click', () => {
             if (deleteModal) deleteModal.style.display = 'none';
@@ -768,7 +850,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Close modal klik overlay
     if (deleteModal) {
         deleteModal.addEventListener('click', (e) => {
             if (e.target === deleteModal) {
@@ -804,9 +885,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
             
+            loadUserMood();
             loadMessages();
-            updateAllMessagesUsername(); // Update pesan lama dengan username terbaru
+            updateAllMessagesUsername();
             setupRealtimeSubscription();
+            startOnlineStatusTracking();
         }
     });
 });
