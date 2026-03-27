@@ -14,6 +14,9 @@ let typingSubscription = null;
 let onlineStatusInterval = null;
 let emojiPickerActive = false;
 
+// PLACEHOLDER AVATAR
+const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40';
+
 // ============ FUNGSI DETEKSI BAHASA ============
 function detectLanguage(text) {
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) return 'ja';
@@ -73,7 +76,7 @@ async function markMessageAsRead(messageId) {
         .neq('user_id', currentUser.id);
 }
 
-// ============ RENDER PESAN (LENGKAP) ============
+// ============ RENDER PESAN ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -94,11 +97,10 @@ async function renderMessage(message) {
         }
     }
     
-    // Avatar
-    const avatarUrl = message.avatar_url || 'default-avatar.png';
+    const avatarUrl = message.avatar_url || DEFAULT_AVATAR;
     
     messageDiv.innerHTML = `
-        <img class="message-avatar" src="${avatarUrl}" alt="avatar">
+        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='${DEFAULT_AVATAR}'">
         <div class="message-content-wrapper">
             <div class="message-bubble">
                 <div class="message-header">
@@ -124,7 +126,6 @@ async function renderMessage(message) {
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     
-    // Mark as read jika pesan dari orang lain
     if (!isOwnMessage) {
         await markMessageAsRead(message.id);
     }
@@ -165,7 +166,7 @@ async function sendMessage(messageText, imageUrl = null) {
         original_message: messageText.trim() || '',
         room_id: currentRoomId,
         image_url: imageUrl,
-        avatar_url: currentUser.user_metadata?.avatar_url || 'default-avatar.png'
+        avatar_url: currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR
     };
     
     const { error } = await supabaseClient.from('messages').insert([messageData]);
@@ -239,9 +240,17 @@ async function uploadAvatar(file) {
         .getPublicUrl(filePath);
     
     const avatarUrl = data.publicUrl;
+    
+    // Update di auth user metadata
     await supabaseClient.auth.updateUser({
         data: { avatar_url: avatarUrl }
     });
+    
+    // Update di tabel profiles
+    await supabaseClient
+        .from('profiles')
+        .update({ avatar_url: avatarUrl })
+        .eq('id', currentUser.id);
     
     document.getElementById('current-avatar').src = avatarUrl;
     return avatarUrl;
@@ -277,12 +286,24 @@ function showTypingIndicator(username) {
     }
 }
 
-// ============ ONLINE STATUS ============
+// ============ ONLINE STATUS (Pakai tabel profiles) ============
 async function updateOnlineStatus() {
     if (!currentUser) return;
-    await supabaseClient.auth.updateUser({
-        data: { last_seen: new Date().toISOString() }
-    });
+    await supabaseClient
+        .from('profiles')
+        .update({ 
+            online: true, 
+            last_seen: new Date().toISOString() 
+        })
+        .eq('id', currentUser.id);
+}
+
+async function setUserOffline() {
+    if (!currentUser) return;
+    await supabaseClient
+        .from('profiles')
+        .update({ online: false })
+        .eq('id', currentUser.id);
 }
 
 function startOnlineStatusTracking() {
@@ -292,28 +313,37 @@ function startOnlineStatusTracking() {
 
 // ============ PRIVATE CHAT ============
 async function startPrivateChat(targetUserId) {
-    const roomId = [currentUser.id, targetUserId].sort().join('-');
-    currentRoomId = roomId;
+    const roomId = [currentUser.id, targetUserId].sort().join('_');
+    currentRoomId = `private_${roomId}`;
     document.getElementById('chat-room-name').innerText = 'Private Chat';
     await loadMessages();
 }
 
+// ============ LOAD USER LIST (Dari tabel profiles) ============
 async function loadUserList() {
-    const { data: users } = await supabaseClient.auth.admin.listUsers();
     const userList = document.getElementById('user-list');
     if (!userList) return;
     
+    const { data: profiles, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .neq('id', currentUser?.id);
+    
+    if (error) {
+        console.error('Error loading users:', error);
+        return;
+    }
+    
     userList.innerHTML = '';
-    users.forEach(user => {
-        if (user.id === currentUser?.id) return;
+    profiles.forEach(profile => {
         const userDiv = document.createElement('div');
         userDiv.className = 'user-item';
-        userDiv.onclick = () => startPrivateChat(user.id);
+        userDiv.onclick = () => startPrivateChat(profile.id);
         userDiv.innerHTML = `
-            <img class="user-avatar-small" src="${user.user_metadata?.avatar_url || 'default-avatar.png'}">
+            <img class="user-avatar-small" src="${profile.avatar_url || DEFAULT_AVATAR}" alt="avatar" onerror="this.src='${DEFAULT_AVATAR}'">
             <div class="user-info-sidebar">
-                <div class="user-name">${user.user_metadata?.display_name || user.email}</div>
-                <div class="user-status online">Online</div>
+                <div class="user-name">${escapeHtml(profile.username)}</div>
+                <div class="user-status ${profile.online ? 'online' : 'offline'}">${profile.online ? 'Online' : 'Offline'}</div>
             </div>
         `;
         userList.appendChild(userDiv);
@@ -328,12 +358,14 @@ function setupRealtimeSubscriptions() {
     messagesSubscription = supabaseClient
         .channel('messages-channel')
         .on('postgres_changes', 
-            { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${currentRoomId}` },
+            { event: 'INSERT', schema: 'public', table: 'messages' },
             async (payload) => {
-                if (payload.new.user_id !== currentUser?.id) {
+                if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) {
                     playNotificationSound();
                 }
-                await renderMessage(payload.new);
+                if (payload.new.room_id === currentRoomId) {
+                    await renderMessage(payload.new);
+                }
             }
         )
         .on('postgres_changes',
@@ -356,6 +388,17 @@ function setupRealtimeSubscriptions() {
         .subscribe();
 }
 
+// ============ GET PROFILE ============
+async function getProfile(userId) {
+    const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+    if (error) return null;
+    return data;
+}
+
 // ============ AUTH FUNCTIONS ============
 async function handleLogin(email, password) {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -365,11 +408,12 @@ async function handleLogin(email, password) {
     }
     
     currentUser = data.user;
-    currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
+    const profile = await getProfile(currentUser.id);
+    currentUserLanguage = profile?.preferred_language || currentUser.user_metadata?.preferred_language || 'id';
     
     document.getElementById('user-language').value = currentUserLanguage;
-    document.getElementById('current-username').textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    document.getElementById('current-avatar').src = currentUser.user_metadata?.avatar_url || 'default-avatar.png';
+    document.getElementById('current-username').textContent = profile?.username || currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    document.getElementById('current-avatar').src = profile?.avatar_url || currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR;
     document.getElementById('auth-container').style.display = 'none';
     document.getElementById('chat-container').style.display = 'flex';
     
@@ -381,7 +425,8 @@ async function handleLogin(email, password) {
 }
 
 async function handleRegister(username, email, password, language, avatarFile) {
-    let avatarUrl = null;
+    let avatarUrl = DEFAULT_AVATAR;
+    
     if (avatarFile) {
         const fileExt = avatarFile.name.split('.').pop();
         const fileName = `${Date.now()}.${fileExt}`;
@@ -403,7 +448,7 @@ async function handleRegister(username, email, password, language, avatarFile) {
             data: {
                 display_name: username,
                 preferred_language: language,
-                avatar_url: avatarUrl || 'default-avatar.png'
+                avatar_url: avatarUrl
             }
         }
     });
@@ -418,6 +463,7 @@ async function handleRegister(username, email, password, language, avatarFile) {
 }
 
 async function handleLogout() {
+    await setUserOffline();
     await supabaseClient.auth.signOut();
     if (onlineStatusInterval) clearInterval(onlineStatusInterval);
     if (messagesSubscription) messagesSubscription.unsubscribe();
@@ -425,6 +471,27 @@ async function handleLogout() {
     currentUser = null;
     document.getElementById('auth-container').style.display = 'flex';
     document.getElementById('chat-container').style.display = 'none';
+}
+
+// ============ CREATE EMOJI PICKER ============
+function createEmojiPicker() {
+    const picker = document.createElement('div');
+    picker.id = 'emoji-picker';
+    picker.className = 'emoji-picker';
+    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘'];
+    emojis.forEach(emoji => {
+        const span = document.createElement('span');
+        span.className = 'emoji-item';
+        span.textContent = emoji;
+        span.onclick = () => {
+            const input = document.getElementById('message-input');
+            input.value += emoji;
+            picker.classList.remove('active');
+        };
+        picker.appendChild(span);
+    });
+    document.querySelector('.message-input-container').appendChild(picker);
+    return picker;
 }
 
 // ============ EVENT LISTENERS ============
@@ -496,6 +563,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('user-language').addEventListener('change', async (e) => {
         currentUserLanguage = e.target.value;
         if (currentUser) {
+            await supabaseClient
+                .from('profiles')
+                .update({ preferred_language: currentUserLanguage })
+                .eq('id', currentUser.id);
             await supabaseClient.auth.updateUser({ data: { preferred_language: currentUserLanguage } });
             loadMessages();
         }
@@ -549,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // New private chat
+    // New public chat
     document.getElementById('new-chat-btn').addEventListener('click', () => {
         currentRoomId = 'public';
         document.getElementById('chat-room-name').innerText = 'Public Chat';
@@ -557,40 +628,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Check session
-    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+    supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
-            currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
+            const profile = await getProfile(currentUser.id);
+            currentUserLanguage = profile?.preferred_language || currentUser.user_metadata?.preferred_language || 'id';
             document.getElementById('auth-container').style.display = 'none';
             document.getElementById('chat-container').style.display = 'flex';
-            document.getElementById('current-username').textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-            document.getElementById('current-avatar').src = currentUser.user_metadata?.avatar_url || 'default-avatar.png';
+            document.getElementById('current-username').textContent = profile?.username || currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+            document.getElementById('current-avatar').src = profile?.avatar_url || currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR;
             document.getElementById('user-language').value = currentUserLanguage;
-            loadUserList();
-            loadMessages();
+            await loadUserList();
+            await loadMessages();
             setupRealtimeSubscriptions();
             startOnlineStatusTracking();
         }
     });
 });
-
-// ============ CREATE EMOJI PICKER ============
-function createEmojiPicker() {
-    const picker = document.createElement('div');
-    picker.id = 'emoji-picker';
-    picker.className = 'emoji-picker';
-    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘'];
-    emojis.forEach(emoji => {
-        const span = document.createElement('span');
-        span.className = 'emoji-item';
-        span.textContent = emoji;
-        span.onclick = () => {
-            const input = document.getElementById('message-input');
-            input.value += emoji;
-            picker.classList.remove('active');
-        };
-        picker.appendChild(span);
-    });
-    document.querySelector('.message-input-container').appendChild(picker);
-    return picker;
-}
