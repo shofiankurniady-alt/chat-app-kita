@@ -10,7 +10,7 @@ let currentUserLanguage = 'id';
 
 // Fungsi terjemahan
 async function translateText(text, targetLang) {
-    if (!text || !targetLang || targetLang === 'id') return text;
+    if (!text || !targetLang) return text;
     
     try {
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
@@ -38,7 +38,8 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN - SUDAH DIPERBAIKI ============
+// ============ RENDER PESAN - VERSION FINAL ============
+// SEMUA pesan dari orang lain akan diterjemahkan dan menampilkan pesan asli
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -51,11 +52,11 @@ async function renderMessage(message) {
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // HANYA pesan dari orang lain yang diterjemahkan
+    // JIKA PESAN DARI ORANG LAIN
     if (!isOwnMessage) {
         // Terjemahkan ke bahasa user saat ini
-        if (currentUserLanguage !== 'id') {
-            const translated = await translateText(message.original_message, currentUserLanguage);
+        const translated = await translateText(message.original_message, currentUserLanguage);
+        if (translated !== message.original_message) {
             displayText = translated;
             showOriginal = true;
         }
@@ -69,8 +70,7 @@ async function renderMessage(message) {
                 <span class="time">${formatTime(message.created_at)}</span>
             </div>
             <div class="message-content">${escapeHtml(displayText)}</div>
-            ${showOriginal && displayText !== message.original_message ? 
-                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+            ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
