@@ -352,3 +352,29 @@ body {
     background: #334155;
     border-radius: 8px;
 }
+/* ============ NOTIFIKASI SUARA ============ */
+.notification-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #1e293b;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border-left: 4px solid #3b82f6;
+    animation: slideIn 0.3s ease;
+    z-index: 1000;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}

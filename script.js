@@ -7,6 +7,55 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 let currentUser = null;
 let currentUserLanguage = 'id';
+let soundEnabled = true; // Status suara ON/OFF
+
+// ============ NOTIFIKASI SUARA ============
+function playNotificationSound() {
+    if (!soundEnabled) return;
+    
+    // Gunakan Web Speech API untuk mengucapkan pesan dalam bahasa Jepang
+    if ('speechSynthesis' in window) {
+        // Hentikan suara yang sedang berlangsung
+        window.speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance('新しいメッセージがあります');
+        utterance.lang = 'ja-JP'; // Bahasa Jepang
+        utterance.rate = 0.9; // Kecepatan bicara sedikit lebih lambat
+        utterance.pitch = 1.0;
+        
+        // Cari suara Jepang jika ada
+        const voices = window.speechSynthesis.getVoices();
+        const japaneseVoice = voices.find(voice => voice.lang.includes('ja'));
+        if (japaneseVoice) {
+            utterance.voice = japaneseVoice;
+        }
+        
+        window.speechSynthesis.speak(utterance);
+    } else {
+        console.log('Web Speech API not supported');
+    }
+}
+
+// Fungsi untuk menampilkan notifikasi visual (opsional)
+function showNotificationToast(message) {
+    // Hapus toast lama
+    const oldToast = document.querySelector('.notification-toast');
+    if (oldToast) oldToast.remove();
+    
+    // Buat toast baru
+    const toast = document.createElement('div');
+    toast.className = 'notification-toast';
+    toast.innerHTML = `
+        <i class="fas fa-bell" style="margin-right: 10px; color: #3b82f6;"></i>
+        <span>📩 ${message}</span>
+    `;
+    document.body.appendChild(toast);
+    
+    // Hapus setelah 3 detik
+    setTimeout(() => {
+        if (toast && toast.remove) toast.remove();
+    }, 3000);
+}
 
 // ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
@@ -141,6 +190,7 @@ async function sendMessage(messageText) {
 
 let messagesSubscription = null;
 
+// ============ REALTIME SUBSCRIPTION DENGAN NOTIFIKASI SUARA ============
 function setupRealtimeSubscription() {
     if (messagesSubscription) {
         messagesSubscription.unsubscribe();
@@ -151,6 +201,15 @@ function setupRealtimeSubscription() {
         .on('postgres_changes', 
             { event: 'INSERT', schema: 'public', table: 'messages' },
             async (payload) => {
+                // MAINAN: hanya bunyi jika pesan dari orang lain
+                if (payload.new.user_id !== currentUser?.id) {
+                    // Suara: "新しいメッセージがあります" (Ada pesan baru)
+                    playNotificationSound();
+                    
+                    // Notifikasi visual (opsional)
+                    const senderName = payload.new.username || 'seseorang';
+                    showNotificationToast(`Pesan baru dari ${senderName}`);
+                }
                 await renderMessage(payload.new);
             }
         )
@@ -227,6 +286,12 @@ async function handleLogout() {
 // ============ EVENT LISTENERS ============
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up event listeners...');
+    
+    // ============ LOAD VOICES (untuk Web Speech API) ============
+    // Memuat daftar suara agar siap digunakan
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.getVoices();
+    }
     
     // Tab switching
     const tabBtns = document.querySelectorAll('.tab-btn');
@@ -313,6 +378,32 @@ document.addEventListener('DOMContentLoaded', () => {
         logoutBtn.addEventListener('click', handleLogout);
     }
     
+    // ============ TOMBOL MUTE/UNMUTE SUARA ============
+    const soundToggleBtn = document.getElementById('sound-toggle-btn');
+    if (soundToggleBtn) {
+        soundToggleBtn.addEventListener('click', () => {
+            soundEnabled = !soundEnabled;
+            const icon = soundToggleBtn.querySelector('i');
+            if (soundEnabled) {
+                icon.className = 'fas fa-volume-up';
+                soundToggleBtn.title = 'Matikan suara';
+                // Ucapkan pesan singkat sebagai konfirmasi suara ON
+                if ('speechSynthesis' in window) {
+                    const utterance = new SpeechSynthesisUtterance('音声オン');
+                    utterance.lang = 'ja-JP';
+                    window.speechSynthesis.speak(utterance);
+                }
+            } else {
+                icon.className = 'fas fa-volume-mute';
+                soundToggleBtn.title = 'Nyalakan suara';
+                // Hentikan suara yang sedang berlangsung
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                }
+            }
+        });
+    }
+    
     // Language change
     const userLanguage = document.getElementById('user-language');
     if (userLanguage) {
@@ -360,7 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Tutup emoji picker jika klik di luar
         document.addEventListener('click', (e) => {
-            if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
+            if (emojiPicker && !emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
                 emojiPicker.style.display = 'none';
             }
         });
