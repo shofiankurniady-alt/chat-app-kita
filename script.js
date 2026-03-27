@@ -3,7 +3,7 @@ const SUPABASE_URL = 'https://gqlxktuqmtgpixmbcefp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxbHhrdHVxbXRncGl4bWJjZWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk2MTksImV4cCI6MjA5MDE3NTYxOX0.SEbaQaYFRIMhrTGK--XY-YEHG5v5LUdU6__gv8Qi8rE';
 
 // Inisialisasi Supabase
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentUserLanguage = 'id';
@@ -77,7 +77,7 @@ async function loadMessages() {
     
     messagesContainer.innerHTML = '<div class="loading-messages">Loading messages...</div>';
     
-    const { data: messages, error } = await supabase
+    const { data: messages, error } = await supabaseClient
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true })
@@ -104,7 +104,7 @@ async function sendMessage(messageText) {
         original_message: messageText.trim()
     };
     
-    const { error } = await supabase.from('messages').insert([messageData]);
+    const { error } = await supabaseClient.from('messages').insert([messageData]);
     if (error) {
         console.error('Error sending message:', error);
         alert('Gagal mengirim pesan: ' + error.message);
@@ -118,7 +118,7 @@ function setupRealtimeSubscription() {
         messagesSubscription.unsubscribe();
     }
     
-    messagesSubscription = supabase
+    messagesSubscription = supabaseClient
         .channel('messages-channel')
         .on('postgres_changes', 
             { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -130,7 +130,7 @@ function setupRealtimeSubscription() {
 }
 
 async function handleLogin(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
         email: email,
         password: password
     });
@@ -162,7 +162,7 @@ async function handleLogin(email, password) {
 }
 
 async function handleRegister(username, email, password, language) {
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await supabaseClient.auth.signUp({
         email: email,
         password: password,
         options: {
@@ -183,7 +183,7 @@ async function handleRegister(username, email, password, language) {
 }
 
 async function handleLogout() {
-    await supabase.auth.signOut();
+    await supabaseClient.auth.signOut();
     currentUser = null;
     if (messagesSubscription) {
         messagesSubscription.unsubscribe();
@@ -196,7 +196,7 @@ async function handleLogout() {
     if (chatContainer) chatContainer.style.display = 'none';
 }
 
-// Event Listeners - PASTIKAN INI ADA
+// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up event listeners...');
     
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // Register form - PERBAIKAN UTAMA
+    // Register form
     const registerSubmitBtn = document.getElementById('register-form');
     if (registerSubmitBtn) {
         registerSubmitBtn.addEventListener('submit', async (e) => {
@@ -291,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userLanguage.addEventListener('change', async (e) => {
             currentUserLanguage = e.target.value;
             if (currentUser) {
-                await supabase.auth.updateUser({
+                await supabaseClient.auth.updateUser({
                     data: { preferred_language: currentUserLanguage }
                 });
                 // Refresh messages
@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const msgDiv = messages[i];
                         const msgId = msgDiv.getAttribute('data-message-id');
                         if (msgId) {
-                            const { data: msg } = await supabase.from('messages').select('*').eq('id', msgId).single();
+                            const { data: msg } = await supabaseClient.from('messages').select('*').eq('id', msgId).single();
                             if (msg) {
                                 const newDiv = document.createElement('div');
                                 msgDiv.parentNode.replaceChild(newDiv, msgDiv);
@@ -316,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Cek session yang ada
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
             currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
