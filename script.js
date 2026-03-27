@@ -1,15 +1,35 @@
-// ==================== KONFIGURASI ====================
+// ============ KONFIGURASI SUPABASE ============
 const SUPABASE_URL = 'https://gqlxktuqmtgpixmbcefp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxbHhrdHVxbXRncGl4bWJjZWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk2MTksImV4cCI6MjA5MDE3NTYxOX0.SEbaQaYFRIMhrTGK--XY-YEHG5v5LUdU6__gv8Qi8rE';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Variabel Global
+// Inisialisasi Supabase
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 let currentUser = null;
-let currentUserLang = 'id';
+let currentUserLanguage = 'id';
 
-// ==================== FUNGSI BANTUAN ====================
+// Fungsi terjemahan
+async function translateText(text, targetLang) {
+    if (!text || !targetLang || targetLang === 'id') return text;
+    
+    try {
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.responseData && data.responseData.translatedText) {
+            return data.responseData.translatedText;
+        }
+        return text;
+    } catch (error) {
+        console.error('Translation error:', error);
+        return text;
+    }
+}
+
 function formatTime(timestamp) {
-    return new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
@@ -18,208 +38,302 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ==================== FUNGSI TERJEMAHAN ====================
-// Fungsi ini yang paling penting. Dia akan mendeteksi bahasa sumber dan menerjemahkan ke bahasa target.
-async function translateText(text, targetLang) {
-    if (!text || !targetLang) return text;
-
-    // 1. Deteksi bahasa sumber dari teks
-    let sourceLang = 'id'; // default
-    if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) sourceLang = 'ja';
-    else if (/^[a-zA-Z\s\.,!?0-9]+$/.test(text)) sourceLang = 'en';
-
-    // Jika bahasa sumber dan target sama, tidak usah terjemah
-    if (sourceLang === targetLang) return text;
-
-    try {
-        // 2. Panggil API MyMemory
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
-        const response = await fetch(url);
-        const data = await response.json();
-
-        // 3. Ambil hasil terjemahan
-        if (data.responseData && data.responseData.translatedText) {
-            let translated = data.responseData.translatedText;
-            // Hindari menampilkan pesan error dari API
-            if (translated.includes('INVALID') || translated.includes('NO CONTENT')) return text;
-            return translated;
-        }
-        return text;
-    } catch (error) {
-        console.error("Terjemahan gagal:", error);
-        return text;
-    }
-}
-
-// ==================== FUNGSI RENDER PESAN (INTI) ====================
 async function renderMessage(message) {
-    const container = document.getElementById('messages-container');
-    if (!container) return;
-
-    const isOwnMessage = message.user_id === currentUser?.id;
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
-    msgDiv.setAttribute('data-message-id', message.id);
-
+    const messagesContainer = document.getElementById('messages-container');
+    if (!messagesContainer) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${message.user_id === currentUser?.id ? 'message-own' : 'message-other'}`;
+    messageDiv.setAttribute('data-message-id', message.id);
+    
     let displayText = message.original_message;
     let showOriginal = false;
-
-    // *** INI ATURAN UTAMA: ***
-    // Hanya pesan dari orang lain yang akan diproses
-    if (!isOwnMessage) {
-        // Terjemahkan pesan orang lain ke bahasa user yang sedang login
-        const translated = await translateText(message.original_message, currentUserLang);
-        if (translated !== message.original_message) {
-            displayText = translated;
-            showOriginal = true; // Tampilkan pesan asli
-        }
+    
+    if (message.user_id !== currentUser?.id && currentUserLanguage !== 'id') {
+        const translated = await translateText(message.original_message, currentUserLanguage);
+        displayText = translated;
+        showOriginal = true;
     }
-
-    // Tampilkan di HTML
-    msgDiv.innerHTML = `
+    
+    messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
                 <span class="username">${escapeHtml(message.username)}</span>
                 <span class="time">${formatTime(message.created_at)}</span>
             </div>
             <div class="message-content">${escapeHtml(displayText)}</div>
-            ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+            ${showOriginal && displayText !== message.original_message ? 
+                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
-    container.appendChild(msgDiv);
-    container.scrollTop = container.scrollHeight;
+    
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-// ==================== AMBIL PESAN LAMA ====================
 async function loadMessages() {
-    const container = document.getElementById('messages-container');
-    if (!container) return;
-    container.innerHTML = '<div class="loading-messages">Memuat pesan...</div>';
-
-    const { data: messages, error } = await supabase
+    const messagesContainer = document.getElementById('messages-container');
+    if (!messagesContainer) return;
+    
+    messagesContainer.innerHTML = '<div class="loading-messages">Loading messages...</div>';
+    
+    const { data: messages, error } = await supabaseClient
         .from('messages')
         .select('*')
         .order('created_at', { ascending: true })
         .limit(100);
-
+    
     if (error) {
-        container.innerHTML = '<div class="loading-messages">Gagal memuat pesan</div>';
+        console.error('Error loading messages:', error);
+        messagesContainer.innerHTML = '<div class="loading-messages">Error loading messages</div>';
         return;
     }
-
-    container.innerHTML = '';
-    for (const msg of messages) {
-        await renderMessage(msg);
+    
+    messagesContainer.innerHTML = '';
+    for (const message of messages) {
+        await renderMessage(message);
     }
 }
 
-// ==================== KIRIM PESAN ====================
-async function sendMessage(text) {
-    if (!text.trim() || !currentUser) return;
-
-    const { error } = await supabase.from('messages').insert({
+async function sendMessage(messageText) {
+    if (!messageText.trim() || !currentUser) return;
+    
+    const messageData = {
         user_id: currentUser.id,
         username: currentUser.user_metadata?.display_name || currentUser.email.split('@')[0],
-        original_message: text.trim()
-    });
-
-    if (error) alert('Gagal kirim pesan: ' + error.message);
+        original_message: messageText.trim()
+    };
+    
+    const { error } = await supabaseClient.from('messages').insert([messageData]);
+    if (error) {
+        console.error('Error sending message:', error);
+        alert('Gagal mengirim pesan: ' + error.message);
+    }
 }
 
-// ==================== REAL-TIME ====================
-let messageSubscription = null;
-function subscribeToMessages() {
-    if (messageSubscription) messageSubscription.unsubscribe();
-    messageSubscription = supabase
+let messagesSubscription = null;
+
+function setupRealtimeSubscription() {
+    if (messagesSubscription) {
+        messagesSubscription.unsubscribe();
+    }
+    
+    messagesSubscription = supabaseClient
         .channel('messages-channel')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-            await renderMessage(payload.new);
-        })
+        .on('postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'messages' },
+            async (payload) => {
+                await renderMessage(payload.new);
+            }
+        )
         .subscribe();
 }
 
-// ==================== AUTH ====================
-async function login(email, password) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return alert('Login gagal: ' + error.message);
+async function handleLogin(email, password) {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: email,
+        password: password
+    });
+    
+    if (error) {
+        alert('Login gagal: ' + error.message);
+        return false;
+    }
+    
+    currentUser = data.user;
+    currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
+    
+    const userLanguageSelect = document.getElementById('user-language');
+    if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
+    
+    const authContainer = document.getElementById('auth-container');
+    const chatContainer = document.getElementById('chat-container');
+    const currentUsername = document.getElementById('current-username');
+    
+    if (authContainer) authContainer.style.display = 'none';
+    if (chatContainer) chatContainer.style.display = 'flex';
+    if (currentUsername) {
+        currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    }
+    
+    await loadMessages();
+    setupRealtimeSubscription();
+    return true;
 }
 
-async function register(username, email, password, language) {
-    const { error } = await supabase.auth.signUp({
-        email, password,
-        options: { data: { display_name: username, preferred_language: language } }
+async function handleRegister(username, email, password, language) {
+    const { data, error } = await supabaseClient.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+            data: {
+                display_name: username,
+                preferred_language: language
+            }
+        }
     });
-    if (error) return alert('Registrasi gagal: ' + error.message);
+    
+    if (error) {
+        alert('Registrasi gagal: ' + error.message);
+        return false;
+    }
+    
     alert('Registrasi berhasil! Silakan login.');
+    return true;
 }
 
-async function logout() {
-    await supabase.auth.signOut();
-    location.reload(); // Refresh halaman setelah logout
+async function handleLogout() {
+    await supabaseClient.auth.signOut();
+    currentUser = null;
+    if (messagesSubscription) {
+        messagesSubscription.unsubscribe();
+    }
+    
+    const authContainer = document.getElementById('auth-container');
+    const chatContainer = document.getElementById('chat-container');
+    
+    if (authContainer) authContainer.style.display = 'flex';
+    if (chatContainer) chatContainer.style.display = 'none';
 }
 
-// ==================== EVENT LISTENER & INIT ====================
+// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
-    // Event untuk tombol di UI
-    document.getElementById('login-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await login(
-            document.getElementById('login-email').value,
-            document.getElementById('login-password').value
-        );
-    });
-
-    document.getElementById('register-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const pass = document.getElementById('register-password').value;
-        if (pass.length < 6) return alert('Password minimal 6 karakter');
-        await register(
-            document.getElementById('register-username').value,
-            document.getElementById('register-email').value,
-            pass,
-            document.getElementById('register-language').value
-        );
-    });
-
-    document.getElementById('send-btn')?.addEventListener('click', () => {
-        const input = document.getElementById('message-input');
-        sendMessage(input.value);
-        input.value = '';
-    });
-
-    document.getElementById('message-input')?.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+    console.log('DOM loaded, setting up event listeners...');
+    
+    // Tab switching
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const loginForm = document.getElementById('login-form');
+    const registerForm = document.getElementById('register-form');
+    
+    if (tabBtns.length > 0) {
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                if (btn.dataset.tab === 'login') {
+                    if (loginForm) loginForm.classList.add('active');
+                    if (registerForm) registerForm.classList.remove('active');
+                } else {
+                    if (loginForm) loginForm.classList.remove('active');
+                    if (registerForm) registerForm.classList.add('active');
+                }
+            });
+        });
+    }
+    
+    // Login form
+    const loginSubmitBtn = document.getElementById('login-form');
+    if (loginSubmitBtn) {
+        loginSubmitBtn.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const input = document.getElementById('message-input');
-            sendMessage(input.value);
-            input.value = '';
-        }
-    });
-
-    document.getElementById('logout-btn')?.addEventListener('click', logout);
-
-    document.getElementById('user-language')?.addEventListener('change', async (e) => {
-        currentUserLang = e.target.value;
-        if (currentUser) {
-            await supabase.auth.updateUser({ data: { preferred_language: currentUserLang } });
-            loadMessages(); // Refresh pesan dengan bahasa baru
-        }
-    });
-
-    // Cek apakah user sudah login
-    supabase.auth.getSession().then(({ data: { session } }) => {
+            console.log('Login form submitted');
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            await handleLogin(email, password);
+        });
+    }
+    
+    // Register form
+    const registerSubmitBtn = document.getElementById('register-form');
+    if (registerSubmitBtn) {
+        registerSubmitBtn.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('Register form submitted');
+            const username = document.getElementById('register-username').value;
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const language = document.getElementById('register-language').value;
+            
+            if (password.length < 6) {
+                alert('Password minimal 6 karakter');
+                return;
+            }
+            
+            await handleRegister(username, email, password, language);
+        });
+    } else {
+        console.error('Register form not found!');
+    }
+    
+    // Send message
+    const sendBtn = document.getElementById('send-btn');
+    const messageInput = document.getElementById('message-input');
+    
+    if (sendBtn) {
+        sendBtn.addEventListener('click', () => {
+            if (messageInput) {
+                sendMessage(messageInput.value);
+                messageInput.value = '';
+            }
+        });
+    }
+    
+    if (messageInput) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage(messageInput.value);
+                messageInput.value = '';
+            }
+        });
+    }
+    
+    // Logout
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
+    
+    // Language change
+    const userLanguage = document.getElementById('user-language');
+    if (userLanguage) {
+        userLanguage.addEventListener('change', async (e) => {
+            currentUserLanguage = e.target.value;
+            if (currentUser) {
+                await supabaseClient.auth.updateUser({
+                    data: { preferred_language: currentUserLanguage }
+                });
+                // Refresh messages
+                const messagesContainer = document.getElementById('messages-container');
+                if (messagesContainer) {
+                    const messages = messagesContainer.children;
+                    for (let i = 0; i < messages.length; i++) {
+                        const msgDiv = messages[i];
+                        const msgId = msgDiv.getAttribute('data-message-id');
+                        if (msgId) {
+                            const { data: msg } = await supabaseClient.from('messages').select('*').eq('id', msgId).single();
+                            if (msg) {
+                                const newDiv = document.createElement('div');
+                                msgDiv.parentNode.replaceChild(newDiv, msgDiv);
+                                await renderMessage(msg);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Cek session yang ada
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
-            currentUserLang = currentUser.user_metadata?.preferred_language || 'id';
-            document.getElementById('auth-container').style.display = 'none';
-            document.getElementById('chat-container').style.display = 'flex';
-            document.getElementById('current-username').innerText = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-            document.getElementById('user-language').value = currentUserLang;
+            currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
+            const authContainer = document.getElementById('auth-container');
+            const chatContainer = document.getElementById('chat-container');
+            const currentUsername = document.getElementById('current-username');
+            const userLanguageSelect = document.getElementById('user-language');
+            
+            if (authContainer) authContainer.style.display = 'none';
+            if (chatContainer) chatContainer.style.display = 'flex';
+            if (currentUsername) {
+                currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+            }
+            if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
+            
             loadMessages();
-            subscribeToMessages();
-        } else {
-            document.getElementById('auth-container').style.display = 'flex';
-            document.getElementById('chat-container').style.display = 'none';
+            setupRealtimeSubscription();
         }
     });
 });
