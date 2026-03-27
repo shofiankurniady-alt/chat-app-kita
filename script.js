@@ -7,18 +7,41 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let currentUser = null;
 let currentUserLanguage = 'id';
 
-// ============ FUNGSI TERJEMAHAN DENGAN DETEKSI OTOMATIS ============
+// ============ FUNGSI DETEKSI BAHASA ============
+function detectLanguage(text) {
+    // Deteksi Jepang (mengandung Hiragana/Katakana/Kanji)
+    if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) {
+        return 'ja';
+    }
+    // Deteksi Inggris (huruf latin dasar)
+    if (/^[a-zA-Z\s\.,!?]+$/.test(text)) {
+        return 'en';
+    }
+    // Default ke Indonesia
+    return 'id';
+}
+
+// ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     
+    // Deteksi bahasa sumber
+    const sourceLang = detectLanguage(text);
+    
+    // Jika bahasa sumber sama dengan target, tidak perlu terjemah
+    if (sourceLang === targetLang) return text;
+    
     try {
-        // auto = deteksi bahasa sumber otomatis
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.responseData && data.responseData.translatedText) {
             const translated = data.responseData.translatedText;
+            // Hapus pesan error jika ada
+            if (translated.includes('INVALID SOURCE LANGUAGE')) {
+                return text;
+            }
             if (translated === text) return text;
             return translated;
         }
@@ -40,7 +63,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN - SEMUA PESAN DARI ORANG LAIN DITERJEMAHKAN ============
+// ============ RENDER PESAN ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
