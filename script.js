@@ -21,7 +21,7 @@ function detectLanguage(text) {
     return 'id';
 }
 
-// ============ FUNGSI TERJEMAHAN ============
+// ============ FUNGSI TERJEMAHAN (DIPERBAIKI) ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     
@@ -31,6 +31,7 @@ async function translateText(text, targetLang) {
     if (sourceLang === targetLang) return text;
     
     try {
+        // HAPUS kondisi targetLang === 'id' di sini!
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
@@ -61,7 +62,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN - VERSION FINAL ============
+// ============ RENDER PESAN - FINAL ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -74,7 +75,7 @@ async function renderMessage(message) {
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // ============ PENTING: SEMUA PESAN DARI ORANG LAIN DITERJEMAHKAN ============
+    // SEMUA PESAN DARI ORANG LAIN DITERJEMAHKAN
     if (!isOwnMessage) {
         const translated = await translateText(message.original_message, currentUserLanguage);
         if (translated !== message.original_message) {
