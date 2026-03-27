@@ -8,7 +8,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let currentUser = null;
 let currentUserLanguage = 'id';
 
-// Fungsi terjemahan
+// ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang || targetLang === 'id') return text;
     
@@ -38,6 +38,34 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============ EMOJI PICKER FUNCTION ============
+function createEmojiPicker() {
+    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘', '😁', '🤗', '😇', '🥳', '🤩', '😤', '😴', '💀', '👻', '🎃', '💯', '✨', '⭐', '🌟', '💥', '💨', '💦', '💤', '🎵', '🎶', '💖', '💗', '💓', '💕', '💞', '💘', '💝', '💟'];
+    
+    const container = document.getElementById('emoji-picker-container');
+    if (!container) return;
+    
+    const list = container.querySelector('.emoji-list');
+    if (!list) return;
+    
+    list.innerHTML = '';
+    emojis.forEach(emoji => {
+        const span = document.createElement('span');
+        span.className = 'emoji-item';
+        span.textContent = emoji;
+        span.onclick = () => {
+            const input = document.getElementById('message-input');
+            if (input) {
+                input.value += emoji;
+                input.focus();
+            }
+            container.style.display = 'none';
+        };
+        list.appendChild(span);
+    });
+}
+
+// ============ RENDER MESSAGE ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -196,7 +224,7 @@ async function handleLogout() {
     if (chatContainer) chatContainer.style.display = 'none';
 }
 
-// Event Listeners
+// ============ EVENT LISTENERS ============
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up event listeners...');
     
@@ -311,6 +339,29 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
                 }
+            }
+        });
+    }
+    
+    // ============ EMOJI PICKER EVENT ============
+    const emojiBtn = document.getElementById('emoji-btn');
+    const emojiPicker = document.getElementById('emoji-picker-container');
+    
+    if (emojiBtn && emojiPicker) {
+        emojiBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (emojiPicker.style.display === 'none' || !emojiPicker.style.display) {
+                createEmojiPicker(); // refresh emoji setiap dibuka
+                emojiPicker.style.display = 'block';
+            } else {
+                emojiPicker.style.display = 'none';
+            }
+        });
+        
+        // Tutup emoji picker jika klik di luar
+        document.addEventListener('click', (e) => {
+            if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
+                emojiPicker.style.display = 'none';
             }
         });
     }

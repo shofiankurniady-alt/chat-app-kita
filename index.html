@@ -85,8 +85,20 @@
             </div>
             
             <div class="message-input-container">
+                <!-- TOMBOL EMOJI (tambahkan ini) -->
+                <button id="emoji-btn" class="icon-btn" title="Emoji">
+                    <i class="far fa-smile"></i>
+                </button>
+                
                 <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="2"></textarea>
                 <button id="send-btn" class="btn-send">Kirim</button>
+                
+                <!-- EMOJI PICKER CONTAINER (tambahkan ini di sini) -->
+                <div id="emoji-picker-container" class="emoji-picker" style="display: none;">
+                    <div class="emoji-list">
+                        <!-- Emoji akan diisi JavaScript -->
+                    </div>
+                </div>
             </div>
         </div>
     </div>
