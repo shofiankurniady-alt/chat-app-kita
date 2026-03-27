@@ -378,3 +378,181 @@ body {
         opacity: 1;
     }
 }
+/* ============ FLOATING ACTION BUTTON ============ */
+.fab-container {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.fab-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #667eea;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fab-btn:hover {
+    transform: scale(1.1);
+    background: #5a67d8;
+}
+
+.fab-menu {
+    position: absolute;
+    bottom: 70px;
+    right: 0;
+    background: #1e293b;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    display: none;
+    flex-direction: column;
+    border: 1px solid #3b82f6;
+}
+
+.fab-menu.show {
+    display: flex;
+}
+
+.fab-option {
+    padding: 12px 20px;
+    background: #1e293b;
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.fab-option:hover {
+    background: #334155;
+}
+
+.fab-option i {
+    width: 20px;
+}
+
+/* ============ SELECT MODE ============ */
+.message.select-mode {
+    opacity: 0.7;
+    transition: all 0.2s;
+}
+
+.message.select-mode.selected {
+    opacity: 1;
+    background: rgba(59, 130, 246, 0.2);
+    border-left: 3px solid #3b82f6;
+    border-radius: 8px;
+}
+
+.message.select-mode .message-bubble {
+    cursor: pointer;
+}
+
+.select-mode-header {
+    background: #667eea;
+    padding: 10px 15px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.select-mode-header span {
+    font-weight: bold;
+}
+
+.select-mode-header button {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+/* ============ MODAL ============ */
+.delete-modal, .revoke-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+}
+
+.delete-modal-content, .revoke-modal-content {
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 24px;
+    width: 90%;
+    max-width: 320px;
+    text-align: center;
+    border: 1px solid #ef4444;
+}
+
+.revoke-modal-content {
+    border-color: #10b981;
+}
+
+.delete-modal-content h3, .revoke-modal-content h3 {
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.delete-modal-buttons, .revoke-modal-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.btn-delete {
+    flex: 1;
+    background: #ef4444;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.btn-revoke {
+    flex: 1;
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.btn-cancel {
+    flex: 1;
+    background: #334155;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}

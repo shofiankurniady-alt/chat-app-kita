@@ -80,6 +80,22 @@
                     <button id="sound-toggle-btn" class="icon-btn" title="Matikan suara">
                         <i class="fas fa-volume-up"></i>
                     </button>
+                    <!-- Floating Action Button (di header) -->
+                    <div class="fab-header-container">
+                        <button id="fab-btn" class="icon-btn fab-header-btn" title="Menu Pesan">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div id="fab-menu" class="fab-menu-header">
+                            <button id="fab-delete" class="fab-option">
+                                <i class="fas fa-trash-alt"></i>
+                                <span>Delete Message</span>
+                            </button>
+                            <button id="fab-revoke" class="fab-option">
+                                <i class="fas fa-undo-alt"></i>
+                                <span>メッセージを撤回する</span>
+                            </button>
+                        </div>
+                    </div>
                     <button id="logout-btn" class="btn-logout">Logout</button>
                 </div>
             </div>
@@ -103,6 +119,30 @@
                         <!-- Emoji akan diisi JavaScript -->
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ============ MODAL KONFIRMASI HAPUS ============ -->
+    <div id="delete-modal" class="delete-modal" style="display: none;">
+        <div class="delete-modal-content">
+            <h3><i class="fas fa-trash-alt"></i> Hapus Pesan</h3>
+            <p>Apakah Anda yakin ingin menghapus <span id="selected-count">0</span> pesan yang dipilih?</p>
+            <div class="delete-modal-buttons">
+                <button id="confirm-delete" class="btn-delete">Hapus</button>
+                <button id="cancel-delete" class="btn-cancel">Batal</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- ============ MODAL KONFIRMASI REVOKE (撤回) ============ -->
+    <div id="revoke-modal" class="revoke-modal" style="display: none;">
+        <div class="revoke-modal-content">
+            <h3><i class="fas fa-undo-alt"></i> メッセージを撤回する</h3>
+            <p><span id="revoke-selected-count">0</span> 件のメッセージを撤回しますか？</p>
+            <div class="revoke-modal-buttons">
+                <button id="confirm-revoke" class="btn-revoke">撤回する</button>
+                <button id="cancel-revoke" class="btn-cancel">キャンセル</button>
             </div>
         </div>
     </div>
