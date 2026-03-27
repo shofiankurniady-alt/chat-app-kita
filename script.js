@@ -8,17 +8,26 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let currentUser = null;
 let currentUserLanguage = 'id';
 
-// Fungsi terjemahan
+// ============ FUNGSI TERJEMAHAN (Deteksi Bahasa Otomatis) ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     
+    // Jika target bahasa adalah Indonesia dan teks sudah Indonesia, kembalikan
+    // Tapi karena kita tidak tahu bahasa sumber, tetap coba terjemah dengan auto detect
+    
     try {
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
+        // Menggunakan auto detect untuk bahasa sumber
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.responseData && data.responseData.translatedText) {
-            return data.responseData.translatedText;
+            const translated = data.responseData.translatedText;
+            // Jika hasil terjemahan sama dengan teks asli, berarti tidak perlu terjemah
+            if (translated === text) {
+                return text;
+            }
+            return translated;
         }
         return text;
     } catch (error) {
@@ -39,7 +48,9 @@ function escapeHtml(text) {
 }
 
 // ============ RENDER PESAN - VERSION FINAL ============
-// SEMUA pesan dari orang lain akan diterjemahkan dan menampilkan pesan asli
+// SEMUA pesan dari orang lain akan:
+// 1. Diterjemahkan ke bahasa user
+// 2. Menampilkan pesan asli di bawahnya
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -52,17 +63,19 @@ async function renderMessage(message) {
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // JIKA PESAN DARI ORANG LAIN
+    // ============ PESAN DARI ORANG LAIN ============
     if (!isOwnMessage) {
-        // Terjemahkan ke bahasa user saat ini
+        // Terjemahkan pesan ke bahasa user
         const translated = await translateText(message.original_message, currentUserLanguage);
+        
+        // Jika hasil terjemahan berbeda dari aslinya, tampilkan terjemahan dan asli
         if (translated !== message.original_message) {
             displayText = translated;
-            showOriginal = true;
+            showOriginal = true; // Tampilkan pesan asli
         }
     }
     
-    // Tampilkan pesan
+    // ============ TAMPILKAN PESAN ============
     messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
