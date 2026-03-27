@@ -188,6 +188,25 @@ async function revokeSelectedMessages() {
     }
 }
 
+// ============ UPDATE ALL MESSAGES USERNAME ============
+async function updateAllMessagesUsername() {
+    if (!currentUser) return;
+    
+    const newUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    
+    const { error } = await supabaseClient
+        .from('messages')
+        .update({ username: newUsername })
+        .eq('user_id', currentUser.id);
+    
+    if (error) {
+        console.error('Gagal update username di pesan:', error);
+    } else {
+        console.log('Username updated in all messages to:', newUsername);
+        loadMessages();
+    }
+}
+
 // ============ RENDER MESSAGE ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
@@ -255,12 +274,16 @@ async function loadMessages() {
     }
 }
 
+// ============ SEND MESSAGE (DENGAN USERNAME TERBARU) ============
 async function sendMessage(messageText) {
     if (!messageText.trim() || !currentUser) return;
     
+    // Ambil username terbaru langsung dari user_metadata
+    const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    
     const messageData = {
         user_id: currentUser.id,
-        username: currentUser.user_metadata?.display_name || currentUser.email.split('@')[0],
+        username: latestUsername,
         original_message: messageText.trim()
     };
     
@@ -397,6 +420,9 @@ async function saveProfileChanges() {
     const currentUsernameSpan = document.getElementById('current-username');
     if (currentUsernameSpan) currentUsernameSpan.textContent = newUsername;
     
+    // UPDATE SEMUA PESAN LAMA DENGAN USERNAME BARU
+    await updateAllMessagesUsername();
+    
     if (editProfileMessage) {
         editProfileMessage.textContent = '✅ Username berhasil diubah!';
         editProfileMessage.style.color = '#10b981';
@@ -443,6 +469,8 @@ async function handleLogin(email, password) {
     }
     
     await loadMessages();
+    // Update semua pesan lama dengan username terbaru (jika ada perubahan)
+    await updateAllMessagesUsername();
     setupRealtimeSubscription();
     return true;
 }
@@ -766,6 +794,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
             
             loadMessages();
+            updateAllMessagesUsername(); // Update pesan lama dengan username terbaru
             setupRealtimeSubscription();
         }
     });
