@@ -9,12 +9,12 @@ let currentUserLanguage = 'id';
 
 // ============ FUNGSI DETEKSI BAHASA ============
 function detectLanguage(text) {
-    // Deteksi Jepang (mengandung Hiragana/Katakana/Kanji)
+    // Deteksi Jepang (Hiragana/Katakana/Kanji)
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) {
         return 'ja';
     }
     // Deteksi Inggris (huruf latin dasar)
-    if (/^[a-zA-Z\s\.,!?]+$/.test(text)) {
+    if (/^[a-zA-Z\s\.,!?0-9]+$/.test(text)) {
         return 'en';
     }
     // Default ke Indonesia
@@ -25,7 +25,6 @@ function detectLanguage(text) {
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     
-    // Deteksi bahasa sumber
     const sourceLang = detectLanguage(text);
     
     // Jika bahasa sumber sama dengan target, tidak perlu terjemah
@@ -37,12 +36,11 @@ async function translateText(text, targetLang) {
         const data = await response.json();
         
         if (data.responseData && data.responseData.translatedText) {
-            const translated = data.responseData.translatedText;
+            let translated = data.responseData.translatedText;
             // Hapus pesan error jika ada
-            if (translated.includes('INVALID SOURCE LANGUAGE')) {
+            if (translated.includes('INVALID SOURCE LANGUAGE') || translated.includes('NO CONTENT')) {
                 return text;
             }
-            if (translated === text) return text;
             return translated;
         }
         return text;
@@ -63,7 +61,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN ============
+// ============ RENDER PESAN - VERSION FINAL ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -76,7 +74,7 @@ async function renderMessage(message) {
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // SEMUA pesan dari orang lain diterjemahkan
+    // ============ PENTING: SEMUA PESAN DARI ORANG LAIN DITERJEMAHKAN ============
     if (!isOwnMessage) {
         const translated = await translateText(message.original_message, currentUserLanguage);
         if (translated !== message.original_message) {
