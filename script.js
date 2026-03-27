@@ -2,13 +2,14 @@
 const SUPABASE_URL = 'https://gqlxktuqmtgpixmbcefp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxbHhrdHVxbXRncGl4bWJjZWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk2MTksImV4cCI6MjA5MDE3NTYxOX0.SEbaQaYFRIMhrTGK--XY-YEHG5v5LUdU6__gv8Qi8rE';
 
-// Inisialisasi Supabase
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentUserLanguage = 'id';
 let soundEnabled = true;
-let activeAction = null; // 'delete' atau 'revoke'
+let activeAction = null;
+let typingTimeout = null;
+let currentReplyTo = null; // Untuk menyimpan pesan yang akan di-reply
 
 // ============ SELECT MODE VARIABLES ============
 let selectMode = false;
@@ -17,21 +18,15 @@ let selectedMessages = new Set();
 // ============ NOTIFIKASI SUARA ============
 function playNotificationSound() {
     if (!soundEnabled) return;
-    
     if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
-        
         const utterance = new SpeechSynthesisUtterance('新しいメッセージがあります');
         utterance.lang = 'ja-JP';
         utterance.rate = 0.9;
         utterance.pitch = 1.0;
-        
         const voices = window.speechSynthesis.getVoices();
         const japaneseVoice = voices.find(voice => voice.lang.includes('ja'));
-        if (japaneseVoice) {
-            utterance.voice = japaneseVoice;
-        }
-        
+        if (japaneseVoice) utterance.voice = japaneseVoice;
         window.speechSynthesis.speak(utterance);
     }
 }
@@ -39,42 +34,27 @@ function playNotificationSound() {
 function showNotificationToast(message) {
     const oldToast = document.querySelector('.notification-toast');
     if (oldToast) oldToast.remove();
-    
     const toast = document.createElement('div');
     toast.className = 'notification-toast';
-    toast.innerHTML = `
-        <i class="fas fa-bell" style="margin-right: 10px; color: #3b82f6;"></i>
-        <span>📩 ${message}</span>
-    `;
+    toast.innerHTML = `<i class="fas fa-bell" style="margin-right: 10px; color: #3b82f6;"></i><span>📩 ${message}</span>`;
     document.body.appendChild(toast);
-    
-    setTimeout(() => {
-        if (toast && toast.remove) toast.remove();
-    }, 3000);
+    setTimeout(() => toast.remove(), 3000);
 }
 
 // ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang || targetLang === 'id') return text;
-    
     try {
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
-        
-        if (data.responseData && data.responseData.translatedText) {
-            return data.responseData.translatedText;
-        }
+        if (data.responseData && data.responseData.translatedText) return data.responseData.translatedText;
         return text;
-    } catch (error) {
-        console.error('Translation error:', error);
-        return text;
-    }
+    } catch (error) { return text; }
 }
 
 function formatTime(timestamp) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
@@ -83,16 +63,13 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ EMOJI PICKER FUNCTION ============
+// ============ EMOJI PICKER ============
 function createEmojiPicker() {
-    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘', '😁', '🤗', '😇', '🥳', '🤩', '😤', '😴', '💀', '👻', '🎃', '💯', '✨', '⭐', '🌟', '💥', '💨', '💦', '💤', '🎵', '🎶', '💖', '💗', '💓', '💕', '💞', '💘', '💝', '💟'];
-    
+    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘'];
     const container = document.getElementById('emoji-picker-container');
     if (!container) return;
-    
     const list = container.querySelector('.emoji-list');
     if (!list) return;
-    
     list.innerHTML = '';
     emojis.forEach(emoji => {
         const span = document.createElement('span');
@@ -100,161 +77,195 @@ function createEmojiPicker() {
         span.textContent = emoji;
         span.onclick = () => {
             const input = document.getElementById('message-input');
-            if (input) {
-                input.value += emoji;
-                input.focus();
-            }
+            if (input) input.value += emoji;
             container.style.display = 'none';
         };
         list.appendChild(span);
     });
 }
 
-// ============ SELECT MODE FUNCTIONS ============
-function exitSelectMode() {
-    selectMode = false;
-    selectedMessages.clear();
-    activeAction = null;
-    
-    const header = document.getElementById('select-mode-header');
-    if (header) header.remove();
-    
-    const messages = document.querySelectorAll('.message');
-    messages.forEach(msg => {
-        msg.classList.remove('select-mode', 'selected');
-        msg.style.cursor = '';
-    });
+// ============ SCROLL TO BOTTOM ============
+function scrollToBottom() {
+    const container = document.getElementById('messages-container');
+    if (container) container.scrollTop = container.scrollHeight;
 }
 
-function toggleMessageSelection(messageId, element) {
-    if (!selectMode) return;
-    
-    if (selectedMessages.has(messageId)) {
-        selectedMessages.delete(messageId);
-        element.classList.remove('selected');
-    } else {
-        selectedMessages.add(messageId);
-        element.classList.add('selected');
-    }
-    
-    // Update counter di modal
-    const selectedCountSpan = document.getElementById('selected-count');
-    const revokeSelectedSpan = document.getElementById('revoke-selected-count');
-    if (selectedCountSpan) selectedCountSpan.textContent = selectedMessages.size;
-    if (revokeSelectedSpan) revokeSelectedSpan.textContent = selectedMessages.size;
-}
-
-async function deleteSelectedMessages() {
-    if (selectedMessages.size === 0) {
-        alert('Tidak ada pesan yang dipilih');
-        return;
-    }
-    
-    const messageIds = Array.from(selectedMessages);
-    
-    const { error } = await supabaseClient
-        .from('messages')
-        .delete()
-        .in('id', messageIds)
-        .eq('user_id', currentUser.id);
-    
-    if (error) {
-        alert('Gagal menghapus pesan: ' + error.message);
-    } else {
-        exitSelectMode();
-        loadMessages();
-    }
-}
-
-async function revokeSelectedMessages() {
-    if (selectedMessages.size === 0) {
-        alert('撤回するメッセージがありません');
-        return;
-    }
-    
-    const messageIds = Array.from(selectedMessages);
-    
-    const { error } = await supabaseClient
-        .from('messages')
-        .delete()
-        .in('id', messageIds)
-        .eq('user_id', currentUser.id);
-    
-    if (error) {
-        alert('撤回に失敗しました: ' + error.message);
-    } else {
-        exitSelectMode();
-        loadMessages();
-    }
-}
-
-// ============ UPDATE ALL MESSAGES USERNAME ============
-async function updateAllMessagesUsername() {
+// ============ UPDATE READ RECEIPT ============
+async function markMessageAsRead(messageId) {
     if (!currentUser) return;
-    
-    const newUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    
-    const { error } = await supabaseClient
+    await supabaseClient
         .from('messages')
-        .update({ username: newUsername })
-        .eq('user_id', currentUser.id);
-    
-    if (error) {
-        console.error('Gagal update username di pesan:', error);
-    } else {
-        console.log('Username updated in all messages to:', newUsername);
-        loadMessages();
-    }
+        .update({ is_read: true })
+        .eq('id', messageId)
+        .neq('user_id', currentUser.id);
 }
 
-// ============ RENDER MESSAGE ============
+// ============ RENDER MESSAGE (DENGAN REPLY & READ RECEIPT) ============
 async function renderMessage(message) {
-    const messagesContainer = document.getElementById('messages-container');
-    if (!messagesContainer) return;
+    const container = document.getElementById('messages-container');
+    if (!container) return;
     
+    const isOwn = message.user_id === currentUser?.id;
     const messageDiv = document.createElement('div');
-    const isOwnMessage = message.user_id === currentUser?.id;
-    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
+    messageDiv.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
     messageDiv.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    if (message.user_id !== currentUser?.id && currentUserLanguage !== 'id') {
+    if (!isOwn && currentUserLanguage !== 'id') {
         const translated = await translateText(message.original_message, currentUserLanguage);
-        displayText = translated;
-        showOriginal = true;
+        if (translated !== message.original_message) {
+            displayText = translated;
+            showOriginal = true;
+        }
     }
+    
+    // Render reply jika ada
+    let replyHtml = '';
+    if (message.reply_to_message) {
+        const replyData = typeof message.reply_to_message === 'string' ? JSON.parse(message.reply_to_message) : message.reply_to_message;
+        replyHtml = `
+            <div class="replied-message">
+                <span class="replied-sender">↩️ ${escapeHtml(replyData.sender || 'Pesan')}</span>
+                <div>${escapeHtml(replyData.text.substring(0, 100))}${replyData.text.length > 100 ? '...' : ''}</div>
+            </div>
+        `;
+    }
+    
+    const readReceiptHtml = isOwn ? `
+        <div class="read-receipt">
+            ${message.is_read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>'}
+        </div>
+    ` : '';
     
     messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
                 <span class="username">${escapeHtml(message.username)}</span>
                 <span class="time">${formatTime(message.created_at)}</span>
+                ${readReceiptHtml}
+                <button class="reply-btn" data-id="${message.id}" data-username="${escapeHtml(message.username)}" data-text="${escapeHtml(displayText.substring(0, 50))}">
+                    <i class="fas fa-reply"></i>
+                </button>
             </div>
+            ${replyHtml}
             <div class="message-content">${escapeHtml(displayText)}</div>
-            ${showOriginal && displayText !== message.original_message ? 
-                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+            ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
+    // Event untuk reply button
+    const replyBtn = messageDiv.querySelector('.reply-btn');
+    if (replyBtn) {
+        replyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            currentReplyTo = {
+                id: message.id,
+                username: message.username,
+                text: message.original_message.substring(0, 100)
+            };
+            showReplyPreview();
+        });
+    }
+    
     // Event click untuk select mode
     messageDiv.addEventListener('click', (e) => {
-        if (selectMode) {
-            e.stopPropagation();
+        if (selectMode && !e.target.closest('.reply-btn')) {
             toggleMessageSelection(message.id, messageDiv);
         }
     });
     
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    container.appendChild(messageDiv);
+    scrollToBottom();
+    
+    // Mark as read jika pesan dari orang lain
+    if (!isOwn) {
+        await markMessageAsRead(message.id);
+    }
 }
 
-async function loadMessages() {
-    const messagesContainer = document.getElementById('messages-container');
-    if (!messagesContainer) return;
+function showReplyPreview() {
+    const previewDiv = document.getElementById('reply-preview');
+    const previewText = document.getElementById('reply-preview-text');
+    if (previewDiv && previewText && currentReplyTo) {
+        previewText.innerHTML = `<i class="fas fa-reply"></i> Membalas ${escapeHtml(currentReplyTo.username)}: ${escapeHtml(currentReplyTo.text)}`;
+        previewDiv.style.display = 'block';
+    }
+}
+
+function cancelReply() {
+    currentReplyTo = null;
+    const previewDiv = document.getElementById('reply-preview');
+    if (previewDiv) previewDiv.style.display = 'none';
+}
+
+// ============ SEND MESSAGE (DENGAN REPLY) ============
+async function sendMessage(messageText) {
+    if (!messageText.trim() || !currentUser) return;
     
-    messagesContainer.innerHTML = '<div class="loading-messages">Loading messages...</div>';
+    const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    
+    const messageData = {
+        user_id: currentUser.id,
+        username: latestUsername,
+        original_message: messageText.trim(),
+        is_delivered: true
+    };
+    
+    // Tambah data reply jika ada
+    if (currentReplyTo) {
+        messageData.reply_to_id = currentReplyTo.id;
+        messageData.reply_to_message = JSON.stringify({
+            id: currentReplyTo.id,
+            sender: currentReplyTo.username,
+            text: currentReplyTo.text
+        });
+        cancelReply();
+    }
+    
+    const { error } = await supabaseClient.from('messages').insert([messageData]);
+    if (error) alert('Gagal mengirim: ' + error.message);
+}
+
+// ============ TYPING INDICATOR ============
+let typingChannel = null;
+
+async function sendTypingIndicator() {
+    if (!currentUser || !typingChannel) return;
+    
+    const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    
+    await typingChannel.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+            user_id: currentUser.id,
+            username: latestUsername,
+            is_typing: true
+        }
+    });
+}
+
+function showTypingIndicator(username) {
+    const container = document.getElementById('typing-indicator-container');
+    const userNameSpan = document.getElementById('typing-user-name');
+    if (container && userNameSpan) {
+        userNameSpan.textContent = username;
+        container.style.display = 'flex';
+        if (typingTimeout) clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            container.style.display = 'none';
+        }, 2000);
+    }
+}
+
+// ============ LOAD MESSAGES ============
+async function loadMessages() {
+    const container = document.getElementById('messages-container');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading-messages">Loading messages...</div>';
     
     const { data: messages, error } = await supabaseClient
         .from('messages')
@@ -263,113 +274,129 @@ async function loadMessages() {
         .limit(100);
     
     if (error) {
-        console.error('Error loading messages:', error);
-        messagesContainer.innerHTML = '<div class="loading-messages">Error loading messages</div>';
+        container.innerHTML = '<div class="loading-messages">Error loading messages</div>';
         return;
     }
     
-    messagesContainer.innerHTML = '';
+    container.innerHTML = '';
     for (const message of messages) {
         await renderMessage(message);
     }
+    scrollToBottom();
 }
 
-// ============ SEND MESSAGE (DENGAN USERNAME TERBARU) ============
-async function sendMessage(messageText) {
-    if (!messageText.trim() || !currentUser) return;
-    
-    // Ambil username terbaru langsung dari user_metadata
-    const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    
-    const messageData = {
-        user_id: currentUser.id,
-        username: latestUsername,
-        original_message: messageText.trim()
-    };
-    
-    const { error } = await supabaseClient.from('messages').insert([messageData]);
-    if (error) {
-        console.error('Error sending message:', error);
-        alert('Gagal mengirim pesan: ' + error.message);
+// ============ UPDATE ALL MESSAGES USERNAME ============
+async function updateAllMessagesUsername() {
+    if (!currentUser) return;
+    const newUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    await supabaseClient
+        .from('messages')
+        .update({ username: newUsername })
+        .eq('user_id', currentUser.id);
+    loadMessages();
+}
+
+// ============ SELECT MODE FUNCTIONS ============
+function exitSelectMode() {
+    selectMode = false;
+    selectedMessages.clear();
+    activeAction = null;
+    const header = document.getElementById('select-mode-header');
+    if (header) header.remove();
+    document.querySelectorAll('.message').forEach(msg => {
+        msg.classList.remove('select-mode', 'selected');
+        msg.style.cursor = '';
+    });
+}
+
+function toggleMessageSelection(messageId, element) {
+    if (!selectMode) return;
+    if (selectedMessages.has(messageId)) {
+        selectedMessages.delete(messageId);
+        element.classList.remove('selected');
+    } else {
+        selectedMessages.add(messageId);
+        element.classList.add('selected');
     }
+    document.getElementById('selected-count').textContent = selectedMessages.size;
+    document.getElementById('revoke-selected-count').textContent = selectedMessages.size;
 }
 
-let messagesSubscription = null;
-
-// ============ REALTIME SUBSCRIPTION ============
-function setupRealtimeSubscription() {
-    if (messagesSubscription) {
-        messagesSubscription.unsubscribe();
-    }
-    
-    messagesSubscription = supabaseClient
-        .channel('messages-channel')
-        .on('postgres_changes', 
-            { event: 'INSERT', schema: 'public', table: 'messages' },
-            async (payload) => {
-                if (payload.new.user_id !== currentUser?.id) {
-                    playNotificationSound();
-                    const senderName = payload.new.username || 'seseorang';
-                    showNotificationToast(`Pesan baru dari ${senderName}`);
-                }
-                await renderMessage(payload.new);
-            }
-        )
-        .subscribe();
+async function deleteSelectedMessages() {
+    if (selectedMessages.size === 0) return alert('Tidak ada pesan yang dipilih');
+    const messageIds = Array.from(selectedMessages);
+    const { error } = await supabaseClient.from('messages').delete().in('id', messageIds).eq('user_id', currentUser.id);
+    if (error) alert('Gagal menghapus: ' + error.message);
+    else { exitSelectMode(); loadMessages(); }
 }
 
-// ============ SELECT MODE START FUNCTIONS (DENGAN TOMBOL SELESAI) ============
+async function revokeSelectedMessages() {
+    if (selectedMessages.size === 0) return alert('撤回するメッセージがありません');
+    const messageIds = Array.from(selectedMessages);
+    const { error } = await supabaseClient.from('messages').delete().in('id', messageIds).eq('user_id', currentUser.id);
+    if (error) alert('撤回に失敗しました: ' + error.message);
+    else { exitSelectMode(); loadMessages(); }
+}
+
 function startSelectMode(action) {
     selectMode = true;
     selectedMessages.clear();
     activeAction = action;
     
-    // Tambah header select mode dengan tombol SELESAI
     const header = document.createElement('div');
     header.id = 'select-mode-header';
     header.className = 'select-mode-header';
     header.innerHTML = `
         <span><i class="fas fa-check-circle"></i> Klik pesan untuk memilih</span>
         <div>
-            <button id="done-select-mode" style="background: #10b981; padding: 6px 16px; border-radius: 20px; border: none; color: white; cursor: pointer; margin-right: 8px;">Selesai</button>
+            <button id="done-select-mode" style="background: #10b981; padding: 6px 16px; border-radius: 20px; border: none; color: white; cursor: pointer;">Selesai</button>
             <button id="close-select-mode" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer;"><i class="fas fa-times"></i></button>
         </div>
     `;
-    const container = document.getElementById('messages-container');
-    if (container) {
-        container.prepend(header);
-    }
+    document.getElementById('messages-container')?.prepend(header);
     
-    // Tambah class select-mode ke semua pesan
-    const messages = document.querySelectorAll('.message');
-    messages.forEach(msg => {
+    document.querySelectorAll('.message').forEach(msg => {
         msg.classList.add('select-mode');
         msg.style.cursor = 'pointer';
     });
     
-    // Tombol close (X)
-    const closeBtn = document.getElementById('close-select-mode');
-    if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            exitSelectMode();
-        });
-    }
+    document.getElementById('close-select-mode')?.addEventListener('click', exitSelectMode);
+    document.getElementById('done-select-mode')?.addEventListener('click', () => {
+        if (selectedMessages.size > 0) {
+            document.getElementById(activeAction === 'delete' ? 'delete-modal' : 'revoke-modal').style.display = 'flex';
+        } else alert(activeAction === 'delete' ? 'Pilih pesan' : 'メッセージを選択してください');
+    });
+}
+
+// ============ REALTIME SUBSCRIPTION ============
+let messagesSubscription = null;
+
+function setupRealtimeSubscriptions() {
+    if (messagesSubscription) messagesSubscription.unsubscribe();
     
-    // TOMBOL SELESAI - munculkan modal
-    const doneBtn = document.getElementById('done-select-mode');
-    if (doneBtn) {
-        doneBtn.addEventListener('click', () => {
-            if (selectedMessages.size > 0) {
-                if (activeAction === 'delete') {
-                    document.getElementById('delete-modal').style.display = 'flex';
-                } else if (activeAction === 'revoke') {
-                    document.getElementById('revoke-modal').style.display = 'flex';
-                }
-            } else {
-                alert(activeAction === 'delete' ? 'Pilih pesan terlebih dahulu' : 'メッセージを選択してください');
+    messagesSubscription = supabaseClient
+        .channel('messages-channel')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+            if (payload.new.user_id !== currentUser?.id) {
+                playNotificationSound();
+                showNotificationToast(`Pesan baru dari ${payload.new.username}`);
             }
-        });
-    }
+            await renderMessage(payload.new);
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => loadMessages())
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => loadMessages())
+        .subscribe();
+    
+    // Typing channel
+    if (typingChannel) typingChannel.unsubscribe();
+    typingChannel = supabaseClient.channel('typing-channel');
+    typingChannel
+        .on('broadcast', { event: 'typing' }, (payload) => {
+            if (payload.payload.user_id !== currentUser?.id) {
+                showTypingIndicator(payload.payload.username);
+            }
+        })
+        .subscribe();
 }
 
 // ============ EDIT PROFIL ============
@@ -379,119 +406,57 @@ const saveProfileBtn = document.getElementById('save-profile-btn');
 const cancelEditBtn = document.getElementById('cancel-edit-btn');
 const editProfileMessage = document.getElementById('edit-profile-message');
 
-// Buka modal edit profil
 function openEditProfileModal() {
     if (!currentUser) return;
-    
-    // Isi input dengan username saat ini
-    const currentUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    if (editUsernameInput) editUsernameInput.value = currentUsername;
-    if (editProfileMessage) editProfileMessage.textContent = '';
-    if (editProfileModal) editProfileModal.style.display = 'flex';
+    editUsernameInput.value = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    editProfileMessage.textContent = '';
+    editProfileModal.style.display = 'flex';
 }
 
-// Simpan perubahan username
 async function saveProfileChanges() {
     const newUsername = editUsernameInput?.value.trim();
+    if (!newUsername) return editProfileMessage.textContent = 'Username tidak boleh kosong';
+    if (newUsername.length < 3) return editProfileMessage.textContent = 'Username minimal 3 karakter';
     
-    if (!newUsername) {
-        if (editProfileMessage) editProfileMessage.textContent = 'Username tidak boleh kosong';
-        return;
-    }
+    const { error } = await supabaseClient.auth.updateUser({ data: { display_name: newUsername } });
+    if (error) return editProfileMessage.textContent = 'Gagal: ' + error.message;
     
-    if (newUsername.length < 3) {
-        if (editProfileMessage) editProfileMessage.textContent = 'Username minimal 3 karakter';
-        return;
-    }
-    
-    // Update di Supabase Auth
-    const { error } = await supabaseClient.auth.updateUser({
-        data: {
-            display_name: newUsername
-        }
-    });
-    
-    if (error) {
-        if (editProfileMessage) editProfileMessage.textContent = 'Gagal: ' + error.message;
-        return;
-    }
-    
-    // Update tampilan username di header
-    const currentUsernameSpan = document.getElementById('current-username');
-    if (currentUsernameSpan) currentUsernameSpan.textContent = newUsername;
-    
-    // UPDATE SEMUA PESAN LAMA DENGAN USERNAME BARU
+    document.getElementById('current-username').textContent = newUsername;
     await updateAllMessagesUsername();
-    
-    if (editProfileMessage) {
-        editProfileMessage.textContent = '✅ Username berhasil diubah!';
-        editProfileMessage.style.color = '#10b981';
-    }
-    
-    // Tutup modal setelah 1.5 detik
-    setTimeout(() => {
-        if (editProfileModal) editProfileModal.style.display = 'none';
-    }, 1500);
+    editProfileMessage.textContent = '✅ Berhasil!';
+    editProfileMessage.style.color = '#10b981';
+    setTimeout(() => editProfileModal.style.display = 'none', 1500);
 }
 
-// Tutup modal
 function closeEditProfileModal() {
-    if (editProfileModal) editProfileModal.style.display = 'none';
-    if (editProfileMessage) editProfileMessage.textContent = '';
+    editProfileModal.style.display = 'none';
+    editProfileMessage.textContent = '';
 }
 
 // ============ AUTH FUNCTIONS ============
 async function handleLogin(email, password) {
-    const { data, error } = await supabaseClient.auth.signInWithPassword({
-        email: email,
-        password: password
-    });
-    
-    if (error) {
-        alert('Login gagal: ' + error.message);
-        return false;
-    }
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) return alert('Login gagal: ' + error.message);
     
     currentUser = data.user;
     currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
-    
-    const userLanguageSelect = document.getElementById('user-language');
-    if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
-    
-    const authContainer = document.getElementById('auth-container');
-    const chatContainer = document.getElementById('chat-container');
-    const currentUsername = document.getElementById('current-username');
-    
-    if (authContainer) authContainer.style.display = 'none';
-    if (chatContainer) chatContainer.style.display = 'flex';
-    if (currentUsername) {
-        currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    }
+    document.getElementById('user-language').value = currentUserLanguage;
+    document.getElementById('auth-container').style.display = 'none';
+    document.getElementById('chat-container').style.display = 'flex';
+    document.getElementById('current-username').textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
     
     await loadMessages();
-    // Update semua pesan lama dengan username terbaru (jika ada perubahan)
     await updateAllMessagesUsername();
-    setupRealtimeSubscription();
+    setupRealtimeSubscriptions();
     return true;
 }
 
 async function handleRegister(username, email, password, language) {
-    const { data, error } = await supabaseClient.auth.signUp({
-        email: email,
-        password: password,
-        options: {
-            data: {
-                display_name: username,
-                preferred_language: language
-            }
-        }
+    const { error } = await supabaseClient.auth.signUp({
+        email, password,
+        options: { data: { display_name: username, preferred_language: language } }
     });
-    
-    if (error) {
-        alert('Registrasi gagal: ' + error.message);
-        return false;
-    }
-    
+    if (error) return alert('Registrasi gagal: ' + error.message);
     alert('Registrasi berhasil! Silakan login.');
     return true;
 }
@@ -499,108 +464,87 @@ async function handleRegister(username, email, password, language) {
 async function handleLogout() {
     await supabaseClient.auth.signOut();
     currentUser = null;
-    if (messagesSubscription) {
-        messagesSubscription.unsubscribe();
-    }
-    
-    const authContainer = document.getElementById('auth-container');
-    const chatContainer = document.getElementById('chat-container');
-    
-    if (authContainer) authContainer.style.display = 'flex';
-    if (chatContainer) chatContainer.style.display = 'none';
+    if (messagesSubscription) messagesSubscription.unsubscribe();
+    if (typingChannel) typingChannel.unsubscribe();
+    document.getElementById('auth-container').style.display = 'flex';
+    document.getElementById('chat-container').style.display = 'none';
 }
 
 // ============ EVENT LISTENERS ============
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM loaded, setting up event listeners...');
-    
     // Load voices untuk Web Speech API
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.getVoices();
-    }
+    if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
     
     // Tab switching
-    const tabBtns = document.querySelectorAll('.tab-btn');
-    const loginForm = document.getElementById('login-form');
-    const registerForm = document.getElementById('register-form');
-    
-    if (tabBtns.length > 0) {
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                tabBtns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                
-                if (btn.dataset.tab === 'login') {
-                    if (loginForm) loginForm.classList.add('active');
-                    if (registerForm) registerForm.classList.remove('active');
-                } else {
-                    if (loginForm) loginForm.classList.remove('active');
-                    if (registerForm) registerForm.classList.add('active');
-                }
-            });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('login-form').classList.toggle('active', btn.dataset.tab === 'login');
+            document.getElementById('register-form').classList.toggle('active', btn.dataset.tab === 'register');
         });
-    }
+    });
     
-    // Login form
-    const loginSubmitBtn = document.getElementById('login-form');
-    if (loginSubmitBtn) {
-        loginSubmitBtn.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
-            await handleLogin(email, password);
-        });
-    }
+    // Login/Register
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await handleLogin(
+            document.getElementById('login-email').value,
+            document.getElementById('login-password').value
+        );
+    });
     
-    // Register form
-    const registerSubmitBtn = document.getElementById('register-form');
-    if (registerSubmitBtn) {
-        registerSubmitBtn.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const username = document.getElementById('register-username').value;
-            const email = document.getElementById('register-email').value;
-            const password = document.getElementById('register-password').value;
-            const language = document.getElementById('register-language').value;
-            
-            if (password.length < 6) {
-                alert('Password minimal 6 karakter');
-                return;
-            }
-            
-            await handleRegister(username, email, password, language);
-        });
-    }
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const pass = document.getElementById('register-password').value;
+        if (pass.length < 6) return alert('Password minimal 6 karakter');
+        await handleRegister(
+            document.getElementById('register-username').value,
+            document.getElementById('register-email').value,
+            pass,
+            document.getElementById('register-language').value
+        );
+    });
     
     // Send message
-    const sendBtn = document.getElementById('send-btn');
-    const messageInput = document.getElementById('message-input');
+    document.getElementById('send-btn').addEventListener('click', () => {
+        const input = document.getElementById('message-input');
+        sendMessage(input.value);
+        input.value = '';
+    });
     
-    if (sendBtn) {
-        sendBtn.addEventListener('click', () => {
-            if (messageInput) {
-                sendMessage(messageInput.value);
-                messageInput.value = '';
-            }
-        });
-    }
+    let typingTimer;
+    document.getElementById('message-input').addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        sendTypingIndicator();
+        typingTimer = setTimeout(() => {}, 1000);
+    });
     
-    if (messageInput) {
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage(messageInput.value);
-                messageInput.value = '';
-            }
-        });
-    }
+    document.getElementById('message-input').addEventListener('keypress', async (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            const input = document.getElementById('message-input');
+            sendMessage(input.value);
+            input.value = '';
+        }
+    });
+    
+    // Cancel reply
+    document.getElementById('cancel-reply')?.addEventListener('click', cancelReply);
     
     // Logout
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
-    }
+    document.getElementById('logout-btn').addEventListener('click', handleLogout);
     
-    // ============ TOMBOL MUTE/UNMUTE SUARA ============
+    // Language change
+    document.getElementById('user-language').addEventListener('change', async (e) => {
+        currentUserLanguage = e.target.value;
+        if (currentUser) {
+            await supabaseClient.auth.updateUser({ data: { preferred_language: currentUserLanguage } });
+            loadMessages();
+        }
+    });
+    
+    // Sound toggle
     const soundToggleBtn = document.getElementById('sound-toggle-btn');
     if (soundToggleBtn) {
         soundToggleBtn.addEventListener('click', () => {
@@ -608,7 +552,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const icon = soundToggleBtn.querySelector('i');
             if (soundEnabled) {
                 icon.className = 'fas fa-volume-up';
-                soundToggleBtn.title = 'Matikan suara';
                 if ('speechSynthesis' in window) {
                     const utterance = new SpeechSynthesisUtterance('音声オン');
                     utterance.lang = 'ja-JP';
@@ -616,186 +559,71 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else {
                 icon.className = 'fas fa-volume-mute';
-                soundToggleBtn.title = 'Nyalakan suara';
-                if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                }
+                if ('speechSynthesis' in window) window.speechSynthesis.cancel();
             }
         });
     }
     
-    // ============ TOMBOL EDIT PROFIL ============
-    const editProfileBtn = document.getElementById('edit-profile-btn');
-    if (editProfileBtn) {
-        editProfileBtn.addEventListener('click', openEditProfileModal);
-    }
+    // Edit profile
+    document.getElementById('edit-profile-btn')?.addEventListener('click', openEditProfileModal);
+    saveProfileBtn?.addEventListener('click', saveProfileChanges);
+    cancelEditBtn?.addEventListener('click', closeEditProfileModal);
+    editProfileModal?.addEventListener('click', (e) => { if (e.target === editProfileModal) closeEditProfileModal(); });
     
-    // Modal edit profil buttons
-    if (saveProfileBtn) {
-        saveProfileBtn.addEventListener('click', saveProfileChanges);
-    }
-    
-    if (cancelEditBtn) {
-        cancelEditBtn.addEventListener('click', closeEditProfileModal);
-    }
-    
-    // Tutup modal edit profil klik overlay
-    if (editProfileModal) {
-        editProfileModal.addEventListener('click', (e) => {
-            if (e.target === editProfileModal) {
-                closeEditProfileModal();
-            }
-        });
-    }
-    
-    // Language change
-    const userLanguage = document.getElementById('user-language');
-    if (userLanguage) {
-        userLanguage.addEventListener('change', async (e) => {
-            currentUserLanguage = e.target.value;
-            if (currentUser) {
-                await supabaseClient.auth.updateUser({
-                    data: { preferred_language: currentUserLanguage }
-                });
-                loadMessages();
-            }
-        });
-    }
-    
-    // ============ EMOJI PICKER EVENT ============
+    // Emoji
     const emojiBtn = document.getElementById('emoji-btn');
     const emojiPicker = document.getElementById('emoji-picker-container');
-    
     if (emojiBtn && emojiPicker) {
         emojiBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (emojiPicker.style.display === 'none' || !emojiPicker.style.display) {
+            if (emojiPicker.style.display === 'none') {
                 createEmojiPicker();
                 emojiPicker.style.display = 'block';
-            } else {
-                emojiPicker.style.display = 'none';
-            }
+            } else emojiPicker.style.display = 'none';
         });
-        
         document.addEventListener('click', (e) => {
-            if (emojiPicker && !emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
-                emojiPicker.style.display = 'none';
-            }
+            if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) emojiPicker.style.display = 'none';
         });
     }
     
-    // ============ FAB BUTTON EVENTS (DELETE & REVOKE) ============
+    // FAB buttons
     const fabBtn = document.getElementById('fab-btn');
     const fabMenu = document.getElementById('fab-menu');
-    const fabDelete = document.getElementById('fab-delete');
-    const fabRevoke = document.getElementById('fab-revoke');
-    const deleteModal = document.getElementById('delete-modal');
-    const revokeModal = document.getElementById('revoke-modal');
-    const confirmDelete = document.getElementById('confirm-delete');
-    const confirmRevoke = document.getElementById('confirm-revoke');
-    const cancelDelete = document.getElementById('cancel-delete');
-    const cancelRevoke = document.getElementById('cancel-revoke');
+    fabBtn?.addEventListener('click', (e) => { e.stopPropagation(); fabMenu.classList.toggle('show'); });
+    document.addEventListener('click', () => fabMenu?.classList.remove('show'));
+    document.getElementById('fab-delete')?.addEventListener('click', () => startSelectMode('delete'));
+    document.getElementById('fab-revoke')?.addEventListener('click', () => startSelectMode('revoke'));
     
-    // Toggle menu
-    if (fabBtn && fabMenu) {
-        fabBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            fabMenu.classList.toggle('show');
-        });
-        
-        document.addEventListener('click', (e) => {
-            if (fabMenu && fabBtn && !fabMenu.contains(e.target) && !fabBtn.contains(e.target)) {
-                fabMenu.classList.remove('show');
-            }
-        });
-    }
+    // Modals
+    document.getElementById('confirm-delete')?.addEventListener('click', async () => {
+        document.getElementById('delete-modal').style.display = 'none';
+        await deleteSelectedMessages();
+    });
+    document.getElementById('confirm-revoke')?.addEventListener('click', async () => {
+        document.getElementById('revoke-modal').style.display = 'none';
+        await revokeSelectedMessages();
+    });
+    document.getElementById('cancel-delete')?.addEventListener('click', () => {
+        document.getElementById('delete-modal').style.display = 'none';
+        exitSelectMode();
+    });
+    document.getElementById('cancel-revoke')?.addEventListener('click', () => {
+        document.getElementById('revoke-modal').style.display = 'none';
+        exitSelectMode();
+    });
     
-    // Delete option
-    if (fabDelete) {
-        fabDelete.addEventListener('click', () => {
-            if (fabMenu) fabMenu.classList.remove('show');
-            startSelectMode('delete');
-        });
-    }
-    
-    // Revoke option
-    if (fabRevoke) {
-        fabRevoke.addEventListener('click', () => {
-            if (fabMenu) fabMenu.classList.remove('show');
-            startSelectMode('revoke');
-        });
-    }
-    
-    // Confirm Delete
-    if (confirmDelete) {
-        confirmDelete.addEventListener('click', async () => {
-            if (deleteModal) deleteModal.style.display = 'none';
-            await deleteSelectedMessages();
-        });
-    }
-    
-    // Confirm Revoke
-    if (confirmRevoke) {
-        confirmRevoke.addEventListener('click', async () => {
-            if (revokeModal) revokeModal.style.display = 'none';
-            await revokeSelectedMessages();
-        });
-    }
-    
-    // Cancel buttons
-    if (cancelDelete) {
-        cancelDelete.addEventListener('click', () => {
-            if (deleteModal) deleteModal.style.display = 'none';
-            exitSelectMode();
-        });
-    }
-    
-    if (cancelRevoke) {
-        cancelRevoke.addEventListener('click', () => {
-            if (revokeModal) revokeModal.style.display = 'none';
-            exitSelectMode();
-        });
-    }
-    
-    // Close modal klik overlay
-    if (deleteModal) {
-        deleteModal.addEventListener('click', (e) => {
-            if (e.target === deleteModal) {
-                deleteModal.style.display = 'none';
-                exitSelectMode();
-            }
-        });
-    }
-    
-    if (revokeModal) {
-        revokeModal.addEventListener('click', (e) => {
-            if (e.target === revokeModal) {
-                revokeModal.style.display = 'none';
-                exitSelectMode();
-            }
-        });
-    }
-    
-    // Cek session yang ada
+    // Check session
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
             currentUserLanguage = currentUser.user_metadata?.preferred_language || 'id';
-            const authContainer = document.getElementById('auth-container');
-            const chatContainer = document.getElementById('chat-container');
-            const currentUsername = document.getElementById('current-username');
-            const userLanguageSelect = document.getElementById('user-language');
-            
-            if (authContainer) authContainer.style.display = 'none';
-            if (chatContainer) chatContainer.style.display = 'flex';
-            if (currentUsername) {
-                currentUsername.textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-            }
-            if (userLanguageSelect) userLanguageSelect.value = currentUserLanguage;
-            
+            document.getElementById('auth-container').style.display = 'none';
+            document.getElementById('chat-container').style.display = 'flex';
+            document.getElementById('current-username').textContent = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+            document.getElementById('user-language').value = currentUserLanguage;
             loadMessages();
-            updateAllMessagesUsername(); // Update pesan lama dengan username terbaru
-            setupRealtimeSubscription();
+            updateAllMessagesUsername();
+            setupRealtimeSubscriptions();
         }
     });
 });
