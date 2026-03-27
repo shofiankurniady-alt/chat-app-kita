@@ -2,47 +2,23 @@
 const SUPABASE_URL = 'https://gqlxktuqmtgpixmbcefp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxbHhrdHVxbXRncGl4bWJjZWZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTk2MTksImV4cCI6MjA5MDE3NTYxOX0.SEbaQaYFRIMhrTGK--XY-YEHG5v5LUdU6__gv8Qi8rE';
 
+// Inisialisasi Supabase
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let currentUserLanguage = 'id';
 
-// ============ FUNGSI DETEKSI BAHASA ============
-function detectLanguage(text) {
-    // Deteksi Jepang (Hiragana/Katakana/Kanji)
-    if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) {
-        return 'ja';
-    }
-    // Deteksi Inggris (huruf latin dasar)
-    if (/^[a-zA-Z\s\.,!?0-9]+$/.test(text)) {
-        return 'en';
-    }
-    // Default ke Indonesia
-    return 'id';
-}
-
-// ============ FUNGSI TERJEMAHAN (DIPERBAIKI) ============
+// Fungsi terjemahan
 async function translateText(text, targetLang) {
-    if (!text || !targetLang) return text;
-    
-    const sourceLang = detectLanguage(text);
-    
-    // Jika bahasa sumber sama dengan target, tidak perlu terjemah
-    if (sourceLang === targetLang) return text;
+    if (!text || !targetLang || targetLang === 'id') return text;
     
     try {
-        // HAPUS kondisi targetLang === 'id' di sini!
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.responseData && data.responseData.translatedText) {
-            let translated = data.responseData.translatedText;
-            // Hapus pesan error jika ada
-            if (translated.includes('INVALID SOURCE LANGUAGE') || translated.includes('NO CONTENT')) {
-                return text;
-            }
-            return translated;
+            return data.responseData.translatedText;
         }
         return text;
     } catch (error) {
@@ -62,26 +38,21 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN - FINAL ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
     
     const messageDiv = document.createElement('div');
-    const isOwnMessage = message.user_id === currentUser?.id;
-    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
+    messageDiv.className = `message ${message.user_id === currentUser?.id ? 'message-own' : 'message-other'}`;
     messageDiv.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // SEMUA PESAN DARI ORANG LAIN DITERJEMAHKAN
-    if (!isOwnMessage) {
+    if (message.user_id !== currentUser?.id && currentUserLanguage !== 'id') {
         const translated = await translateText(message.original_message, currentUserLanguage);
-        if (translated !== message.original_message) {
-            displayText = translated;
-            showOriginal = true;
-        }
+        displayText = translated;
+        showOriginal = true;
     }
     
     messageDiv.innerHTML = `
@@ -91,7 +62,8 @@ async function renderMessage(message) {
                 <span class="time">${formatTime(message.created_at)}</span>
             </div>
             <div class="message-content">${escapeHtml(displayText)}</div>
-            ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+            ${showOriginal && displayText !== message.original_message ? 
+                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
@@ -228,6 +200,7 @@ async function handleLogout() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM loaded, setting up event listeners...');
     
+    // Tab switching
     const tabBtns = document.querySelectorAll('.tab-btn');
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
@@ -249,20 +222,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Login form
     const loginSubmitBtn = document.getElementById('login-form');
     if (loginSubmitBtn) {
         loginSubmitBtn.addEventListener('submit', async (e) => {
             e.preventDefault();
+            console.log('Login form submitted');
             const email = document.getElementById('login-email').value;
             const password = document.getElementById('login-password').value;
             await handleLogin(email, password);
         });
     }
     
+    // Register form
     const registerSubmitBtn = document.getElementById('register-form');
     if (registerSubmitBtn) {
         registerSubmitBtn.addEventListener('submit', async (e) => {
             e.preventDefault();
+            console.log('Register form submitted');
             const username = document.getElementById('register-username').value;
             const email = document.getElementById('register-email').value;
             const password = document.getElementById('register-password').value;
@@ -275,8 +252,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             await handleRegister(username, email, password, language);
         });
+    } else {
+        console.error('Register form not found!');
     }
     
+    // Send message
     const sendBtn = document.getElementById('send-btn');
     const messageInput = document.getElementById('message-input');
     
@@ -299,11 +279,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Logout
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
     }
     
+    // Language change
     const userLanguage = document.getElementById('user-language');
     if (userLanguage) {
         userLanguage.addEventListener('change', async (e) => {
@@ -312,6 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await supabaseClient.auth.updateUser({
                     data: { preferred_language: currentUserLanguage }
                 });
+                // Refresh messages
                 const messagesContainer = document.getElementById('messages-container');
                 if (messagesContainer) {
                     const messages = messagesContainer.children;
@@ -332,6 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Cek session yang ada
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
             currentUser = session.user;
