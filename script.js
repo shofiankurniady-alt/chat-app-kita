@@ -7,7 +7,8 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 let currentUser = null;
 let currentUserLanguage = 'id';
-let soundEnabled = true; // Status suara ON/OFF
+let soundEnabled = true;
+let activeAction = null; // 'delete' atau 'revoke'
 
 // ============ SELECT MODE VARIABLES ============
 let selectMode = false;
@@ -113,6 +114,7 @@ function createEmojiPicker() {
 function exitSelectMode() {
     selectMode = false;
     selectedMessages.clear();
+    activeAction = null;
     
     const header = document.getElementById('select-mode-header');
     if (header) header.remove();
@@ -293,18 +295,22 @@ function setupRealtimeSubscription() {
         .subscribe();
 }
 
-// ============ SELECT MODE START FUNCTIONS ============
-function startSelectMode() {
+// ============ SELECT MODE START FUNCTIONS (DENGAN TOMBOL SELESAI) ============
+function startSelectMode(action) {
     selectMode = true;
     selectedMessages.clear();
+    activeAction = action;
     
-    // Tambah header select mode
+    // Tambah header select mode dengan tombol SELESAI
     const header = document.createElement('div');
     header.id = 'select-mode-header';
     header.className = 'select-mode-header';
     header.innerHTML = `
-        <span><i class="fas fa-check-circle"></i> Pilih pesan yang akan diproses</span>
-        <button id="close-select-mode"><i class="fas fa-times"></i></button>
+        <span><i class="fas fa-check-circle"></i> Klik pesan untuk memilih</span>
+        <div>
+            <button id="done-select-mode" style="background: #10b981; padding: 6px 16px; border-radius: 20px; border: none; color: white; cursor: pointer; margin-right: 8px;">Selesai</button>
+            <button id="close-select-mode" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer;"><i class="fas fa-times"></i></button>
+        </div>
     `;
     const container = document.getElementById('messages-container');
     if (container) {
@@ -318,10 +324,94 @@ function startSelectMode() {
         msg.style.cursor = 'pointer';
     });
     
-    // Event close select mode
-    document.getElementById('close-select-mode')?.addEventListener('click', () => {
-        exitSelectMode();
+    // Tombol close (X)
+    const closeBtn = document.getElementById('close-select-mode');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            exitSelectMode();
+        });
+    }
+    
+    // TOMBOL SELESAI - munculkan modal
+    const doneBtn = document.getElementById('done-select-mode');
+    if (doneBtn) {
+        doneBtn.addEventListener('click', () => {
+            if (selectedMessages.size > 0) {
+                if (activeAction === 'delete') {
+                    document.getElementById('delete-modal').style.display = 'flex';
+                } else if (activeAction === 'revoke') {
+                    document.getElementById('revoke-modal').style.display = 'flex';
+                }
+            } else {
+                alert(activeAction === 'delete' ? 'Pilih pesan terlebih dahulu' : 'メッセージを選択してください');
+            }
+        });
+    }
+}
+
+// ============ EDIT PROFIL ============
+const editProfileModal = document.getElementById('edit-profile-modal');
+const editUsernameInput = document.getElementById('edit-username');
+const saveProfileBtn = document.getElementById('save-profile-btn');
+const cancelEditBtn = document.getElementById('cancel-edit-btn');
+const editProfileMessage = document.getElementById('edit-profile-message');
+
+// Buka modal edit profil
+function openEditProfileModal() {
+    if (!currentUser) return;
+    
+    // Isi input dengan username saat ini
+    const currentUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    if (editUsernameInput) editUsernameInput.value = currentUsername;
+    if (editProfileMessage) editProfileMessage.textContent = '';
+    if (editProfileModal) editProfileModal.style.display = 'flex';
+}
+
+// Simpan perubahan username
+async function saveProfileChanges() {
+    const newUsername = editUsernameInput?.value.trim();
+    
+    if (!newUsername) {
+        if (editProfileMessage) editProfileMessage.textContent = 'Username tidak boleh kosong';
+        return;
+    }
+    
+    if (newUsername.length < 3) {
+        if (editProfileMessage) editProfileMessage.textContent = 'Username minimal 3 karakter';
+        return;
+    }
+    
+    // Update di Supabase Auth
+    const { error } = await supabaseClient.auth.updateUser({
+        data: {
+            display_name: newUsername
+        }
     });
+    
+    if (error) {
+        if (editProfileMessage) editProfileMessage.textContent = 'Gagal: ' + error.message;
+        return;
+    }
+    
+    // Update tampilan username di header
+    const currentUsernameSpan = document.getElementById('current-username');
+    if (currentUsernameSpan) currentUsernameSpan.textContent = newUsername;
+    
+    if (editProfileMessage) {
+        editProfileMessage.textContent = '✅ Username berhasil diubah!';
+        editProfileMessage.style.color = '#10b981';
+    }
+    
+    // Tutup modal setelah 1.5 detik
+    setTimeout(() => {
+        if (editProfileModal) editProfileModal.style.display = 'none';
+    }, 1500);
+}
+
+// Tutup modal
+function closeEditProfileModal() {
+    if (editProfileModal) editProfileModal.style.display = 'none';
+    if (editProfileMessage) editProfileMessage.textContent = '';
 }
 
 // ============ AUTH FUNCTIONS ============
@@ -506,6 +596,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // ============ TOMBOL EDIT PROFIL ============
+    const editProfileBtn = document.getElementById('edit-profile-btn');
+    if (editProfileBtn) {
+        editProfileBtn.addEventListener('click', openEditProfileModal);
+    }
+    
+    // Modal edit profil buttons
+    if (saveProfileBtn) {
+        saveProfileBtn.addEventListener('click', saveProfileChanges);
+    }
+    
+    if (cancelEditBtn) {
+        cancelEditBtn.addEventListener('click', closeEditProfileModal);
+    }
+    
+    // Tutup modal edit profil klik overlay
+    if (editProfileModal) {
+        editProfileModal.addEventListener('click', (e) => {
+            if (e.target === editProfileModal) {
+                closeEditProfileModal();
+            }
+        });
+    }
+    
     // Language change
     const userLanguage = document.getElementById('user-language');
     if (userLanguage) {
@@ -561,7 +675,6 @@ document.addEventListener('DOMContentLoaded', () => {
             fabMenu.classList.toggle('show');
         });
         
-        // Tutup menu klik di luar
         document.addEventListener('click', (e) => {
             if (fabMenu && fabBtn && !fabMenu.contains(e.target) && !fabBtn.contains(e.target)) {
                 fabMenu.classList.remove('show');
@@ -573,22 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fabDelete) {
         fabDelete.addEventListener('click', () => {
             if (fabMenu) fabMenu.classList.remove('show');
-            startSelectMode();
-            
-            // Observer untuk deteksi saat user selesai select
-            const observer = new MutationObserver(() => {
-                const header = document.getElementById('select-mode-header');
-                if (!header && selectMode === true) {
-                    observer.disconnect();
-                    if (selectedMessages.size > 0 && deleteModal) {
-                        deleteModal.style.display = 'flex';
-                    } else if (selectedMessages.size === 0) {
-                        exitSelectMode();
-                        alert('Tidak ada pesan yang dipilih');
-                    }
-                }
-            });
-            observer.observe(document.getElementById('messages-container'), { childList: true, subtree: true });
+            startSelectMode('delete');
         });
     }
     
@@ -596,21 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fabRevoke) {
         fabRevoke.addEventListener('click', () => {
             if (fabMenu) fabMenu.classList.remove('show');
-            startSelectMode();
-            
-            const observer = new MutationObserver(() => {
-                const header = document.getElementById('select-mode-header');
-                if (!header && selectMode === true) {
-                    observer.disconnect();
-                    if (selectedMessages.size > 0 && revokeModal) {
-                        revokeModal.style.display = 'flex';
-                    } else if (selectedMessages.size === 0) {
-                        exitSelectMode();
-                        alert('撤回するメッセージがありません');
-                    }
-                }
-            });
-            observer.observe(document.getElementById('messages-container'), { childList: true, subtree: true });
+            startSelectMode('revoke');
         });
     }
     

@@ -80,6 +80,10 @@
                     <button id="sound-toggle-btn" class="icon-btn" title="Matikan suara">
                         <i class="fas fa-volume-up"></i>
                     </button>
+                    <!-- Tombol Edit Profil -->
+                    <button id="edit-profile-btn" class="icon-btn" title="Edit Profil">
+                        <i class="fas fa-user-edit"></i>
+                    </button>
                     <!-- Floating Action Button (di header) -->
                     <div class="fab-header-container">
                         <button id="fab-btn" class="icon-btn fab-header-btn" title="Menu Pesan">
@@ -144,6 +148,24 @@
                 <button id="confirm-revoke" class="btn-revoke">撤回する</button>
                 <button id="cancel-revoke" class="btn-cancel">キャンセル</button>
             </div>
+        </div>
+    </div>
+    
+    <!-- ============ MODAL EDIT PROFIL ============ -->
+    <div id="edit-profile-modal" class="edit-modal" style="display: none;">
+        <div class="edit-modal-content">
+            <h3><i class="fas fa-user-edit"></i> Edit Profil</h3>
+            <div class="edit-modal-body">
+                <div class="input-group">
+                    <i class="fas fa-user"></i>
+                    <input type="text" id="edit-username" placeholder="Username baru" autocomplete="off">
+                </div>
+            </div>
+            <div class="edit-modal-buttons">
+                <button id="save-profile-btn" class="btn-save">Simpan</button>
+                <button id="cancel-edit-btn" class="btn-cancel">Batal</button>
+            </div>
+            <div id="edit-profile-message" class="edit-message"></div>
         </div>
     </div>
     
