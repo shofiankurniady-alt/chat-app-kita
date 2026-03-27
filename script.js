@@ -38,23 +38,30 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============ RENDER PESAN - SUDAH DIPERBAIKI ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${message.user_id === currentUser?.id ? 'message-own' : 'message-other'}`;
+    const isOwnMessage = message.user_id === currentUser?.id;
+    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
     messageDiv.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    if (message.user_id !== currentUser?.id && currentUserLanguage !== 'id') {
-        const translated = await translateText(message.original_message, currentUserLanguage);
-        displayText = translated;
-        showOriginal = true;
+    // HANYA pesan dari orang lain yang diterjemahkan
+    if (!isOwnMessage) {
+        // Terjemahkan ke bahasa user saat ini
+        if (currentUserLanguage !== 'id') {
+            const translated = await translateText(message.original_message, currentUserLanguage);
+            displayText = translated;
+            showOriginal = true;
+        }
     }
     
+    // Tampilkan pesan
     messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
