@@ -53,17 +53,28 @@ function showNotificationToast(message) {
     }, 3000);
 }
 
-// ============ FUNGSI TERJEMAHAN ============
+// ============ FUNGSI TERJEMAHAN (LINGVA TRANSLATE - GRATIS UNLIMITED) ============
 async function translateText(text, targetLang) {
-    if (!text || !targetLang || targetLang === 'id') return text;
+    if (!text || !targetLang) return text;
+    
+    // Mapping bahasa untuk Lingva
+    const langMap = {
+        'id': 'id',
+        'ja': 'ja',
+        'en': 'en',
+        'zh': 'zh-CN'
+    };
+    
+    const target = langMap[targetLang] || targetLang;
     
     try {
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
+        // Gunakan Lingva Translate (free, unlimited)
+        const url = `https://lingva.ml/api/v1/auto/${target}/${encodeURIComponent(text)}`;
         const response = await fetch(url);
         const data = await response.json();
         
-        if (data.responseData && data.responseData.translatedText) {
-            return data.responseData.translatedText;
+        if (data.translation) {
+            return data.translation;
         }
         return text;
     } catch (error) {
