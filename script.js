@@ -8,26 +8,17 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let currentUser = null;
 let currentUserLanguage = 'id';
 
-// ============ FUNGSI TERJEMAHAN (Deteksi Bahasa Otomatis) ============
+// Fungsi terjemahan
 async function translateText(text, targetLang) {
-    if (!text || !targetLang) return text;
-    
-    // Jika target bahasa adalah Indonesia dan teks sudah Indonesia, kembalikan
-    // Tapi karena kita tidak tahu bahasa sumber, tetap coba terjemah dengan auto detect
+    if (!text || !targetLang || targetLang === 'id') return text;
     
     try {
-        // Menggunakan auto detect untuk bahasa sumber
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=id|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
         
         if (data.responseData && data.responseData.translatedText) {
-            const translated = data.responseData.translatedText;
-            // Jika hasil terjemahan sama dengan teks asli, berarti tidak perlu terjemah
-            if (translated === text) {
-                return text;
-            }
-            return translated;
+            return data.responseData.translatedText;
         }
         return text;
     } catch (error) {
@@ -47,10 +38,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ============ RENDER PESAN - VERSION FINAL ============
-// SEMUA pesan dari orang lain akan:
-// 1. Diterjemahkan ke bahasa user
-// 2. Menampilkan pesan asli di bawahnya
+// ============ RENDER PESAN - SUDAH DIPERBAIKI ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -63,19 +51,17 @@ async function renderMessage(message) {
     let displayText = message.original_message;
     let showOriginal = false;
     
-    // ============ PESAN DARI ORANG LAIN ============
+    // HANYA pesan dari orang lain yang diterjemahkan
     if (!isOwnMessage) {
-        // Terjemahkan pesan ke bahasa user
-        const translated = await translateText(message.original_message, currentUserLanguage);
-        
-        // Jika hasil terjemahan berbeda dari aslinya, tampilkan terjemahan dan asli
-        if (translated !== message.original_message) {
+        // Terjemahkan ke bahasa user saat ini
+        if (currentUserLanguage !== 'id') {
+            const translated = await translateText(message.original_message, currentUserLanguage);
             displayText = translated;
-            showOriginal = true; // Tampilkan pesan asli
+            showOriginal = true;
         }
     }
     
-    // ============ TAMPILKAN PESAN ============
+    // Tampilkan pesan
     messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
@@ -83,7 +69,8 @@ async function renderMessage(message) {
                 <span class="time">${formatTime(message.created_at)}</span>
             </div>
             <div class="message-content">${escapeHtml(displayText)}</div>
-            ${showOriginal ? `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
+            ${showOriginal && displayText !== message.original_message ? 
+                `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
