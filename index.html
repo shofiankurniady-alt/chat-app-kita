@@ -5,11 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Real-time Chat App</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Font Awesome 6 (Icons) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Emoji Picker Library (untuk fitur emoji) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/emojis/0.1.0/emojis.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/emojis/0.1.0/emojis.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <!-- Form Login/Register -->
+        <!-- ==================== AUTH SECTION ==================== -->
         <div id="auth-container" class="auth-container">
             <div class="auth-box">
                 <h2><i class="fas fa-comments"></i> Chat App</h2>
@@ -18,6 +22,7 @@
                     <button class="tab-btn" data-tab="register">Register</button>
                 </div>
                 
+                <!-- Login Form -->
                 <form id="login-form" class="auth-form active">
                     <div class="input-group">
                         <i class="fas fa-envelope"></i>
@@ -30,6 +35,7 @@
                     <button type="submit" class="btn-primary">Login</button>
                 </form>
                 
+                <!-- Register Form (dengan foto profil) -->
                 <form id="register-form" class="auth-form">
                     <div class="input-group">
                         <i class="fas fa-user"></i>
@@ -52,19 +58,27 @@
                             <option value="zh">中文</option>
                         </select>
                     </div>
+                    <!-- Foto Profil saat Register (opsional) -->
+                    <div class="input-group">
+                        <i class="fas fa-camera"></i>
+                        <input type="file" id="register-avatar" accept="image/*">
+                    </div>
                     <button type="submit" class="btn-primary">Register</button>
                 </form>
             </div>
         </div>
         
-        <!-- Chat Interface -->
+        <!-- ==================== MAIN CHAT INTERFACE ==================== -->
         <div id="chat-container" class="chat-container" style="display: none;">
+            <!-- Header -->
             <div class="chat-header">
                 <div class="user-info">
-                    <i class="fas fa-user-circle"></i>
+                    <img id="current-avatar" class="avatar-small" src="default-avatar.png" alt="avatar">
                     <span id="current-username"></span>
+                    <span id="online-status-dot" class="online-dot"></span>
                 </div>
                 <div class="header-controls">
+                    <!-- Pilih Bahasa -->
                     <div class="language-selector">
                         <label>
                             <i class="fas fa-language"></i>
@@ -76,21 +90,59 @@
                             </select>
                         </label>
                     </div>
+                    <!-- Ganti Foto Profil -->
+                    <button id="change-avatar-btn" class="icon-btn" title="Ganti Foto Profil">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
+                    <!-- Logout -->
                     <button id="logout-btn" class="btn-logout">Logout</button>
                 </div>
             </div>
             
-            <div id="messages-container" class="messages-container">
-                <div class="loading-messages">Loading messages...</div>
+            <!-- Sidebar untuk Private Chat (daftar user) -->
+            <div class="chat-sidebar" id="chat-sidebar">
+                <div class="sidebar-header">
+                    <span>Chats</span>
+                    <button id="new-chat-btn" class="icon-btn"><i class="fas fa-plus"></i></button>
+                </div>
+                <div id="user-list" class="user-list">
+                    <!-- Daftar user online akan diisi oleh JS -->
+                </div>
             </div>
             
-            <div class="message-input-container">
-                <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="2"></textarea>
-                <button id="send-btn" class="btn-send">Kirim</button>
+            <!-- Area Pesan -->
+            <div class="chat-main">
+                <div class="chat-info" id="chat-info">
+                    <span id="chat-room-name">Public Chat</span>
+                </div>
+                <div id="messages-container" class="messages-container">
+                    <div class="loading-messages">Loading messages...</div>
+                </div>
+                
+                <!-- Typing Indicator -->
+                <div id="typing-indicator" class="typing-indicator" style="display: none;">
+                    <span>Someone is typing...</span>
+                </div>
+                
+                <!-- Input Area -->
+                <div class="message-input-container">
+                    <div class="input-buttons">
+                        <button id="emoji-btn" class="icon-btn" title="Emoji"><i class="fas fa-smile"></i></button>
+                        <button id="attach-btn" class="icon-btn" title="Gambar"><i class="fas fa-image"></i></button>
+                    </div>
+                    <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="2"></textarea>
+                    <button id="send-btn" class="btn-send">Kirim</button>
+                </div>
+                <input type="file" id="image-upload" accept="image/*" style="display: none;">
             </div>
         </div>
     </div>
     
+    <!-- Audio untuk notifikasi -->
+    <audio id="notification-sound" src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" preload="auto"></audio>
+    
+    <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
 </body>
