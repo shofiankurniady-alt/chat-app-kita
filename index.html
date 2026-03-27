@@ -2,18 +2,14 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
-    <meta name="theme-color" content="#667eea">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>Real-time Chat App</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Font Awesome 6 (Icons) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <!-- ==================== AUTH SECTION ==================== -->
+        <!-- Form Login/Register -->
         <div id="auth-container" class="auth-container">
             <div class="auth-box">
                 <h2><i class="fas fa-comments"></i> Chat App</h2>
@@ -22,7 +18,6 @@
                     <button class="tab-btn" data-tab="register">Register</button>
                 </div>
                 
-                <!-- Login Form -->
                 <form id="login-form" class="auth-form active">
                     <div class="input-group">
                         <i class="fas fa-envelope"></i>
@@ -35,7 +30,6 @@
                     <button type="submit" class="btn-primary">Login</button>
                 </form>
                 
-                <!-- Register Form (dengan foto profil) -->
                 <form id="register-form" class="auth-form">
                     <div class="input-group">
                         <i class="fas fa-user"></i>
@@ -58,97 +52,45 @@
                             <option value="zh">中文</option>
                         </select>
                     </div>
-                    <!-- Foto Profil saat Register (opsional) -->
-                    <div class="input-group">
-                        <i class="fas fa-camera"></i>
-                        <input type="file" id="register-avatar" accept="image/*">
-                    </div>
                     <button type="submit" class="btn-primary">Register</button>
                 </form>
             </div>
         </div>
         
-        <!-- ==================== MAIN CHAT INTERFACE ==================== -->
+        <!-- Chat Interface -->
         <div id="chat-container" class="chat-container" style="display: none;">
-            <!-- Header -->
             <div class="chat-header">
                 <div class="user-info">
-                    <img id="current-avatar" class="avatar-small" src="https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40" alt="avatar">
+                    <i class="fas fa-user-circle"></i>
                     <span id="current-username"></span>
-                    <span id="online-status-dot" class="online-dot"></span>
                 </div>
                 <div class="header-controls">
-                    <!-- Pilih Bahasa -->
                     <div class="language-selector">
                         <label>
                             <i class="fas fa-language"></i>
                             <select id="user-language">
                                 <option value="id">Bahasa Indonesia</option>
-                                <option value="ja">日本語</option>
+                                <option value="ja">日本語 (Japanese)</option>
                                 <option value="en">English</option>
                                 <option value="zh">中文</option>
                             </select>
                         </label>
                     </div>
-                    <!-- Ganti Foto Profil -->
-                    <button id="change-avatar-btn" class="icon-btn" title="Ganti Foto Profil">
-                        <i class="fas fa-camera"></i>
-                    </button>
-                    <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
-                    <!-- Logout -->
                     <button id="logout-btn" class="btn-logout">Logout</button>
                 </div>
             </div>
             
-            <!-- Sidebar untuk Private Chat (daftar user) -->
-            <div class="chat-sidebar" id="chat-sidebar">
-                <div class="sidebar-header">
-                    <span><i class="fas fa-comments"></i> Chats</span>
-                    <button id="new-chat-btn" class="icon-btn" title="Public Chat"><i class="fas fa-globe"></i></button>
-                </div>
-                <div id="user-list" class="user-list">
-                    <div class="loading-users">Loading users...</div>
-                </div>
+            <div id="messages-container" class="messages-container">
+                <div class="loading-messages">Loading messages...</div>
             </div>
             
-            <!-- Area Pesan -->
-            <div class="chat-main">
-                <div class="chat-info" id="chat-info">
-                    <i class="fas fa-hashtag"></i>
-                    <span id="chat-room-name">Public Chat</span>
-                </div>
-                <div id="messages-container" class="messages-container">
-                    <div class="loading-messages">
-                        <i class="fas fa-spinner fa-spin"></i> Loading messages...
-                    </div>
-                </div>
-                
-                <!-- Typing Indicator -->
-                <div id="typing-indicator" class="typing-indicator" style="display: none;">
-                    <i class="fas fa-pencil-alt"></i>
-                    <span>Someone is typing...</span>
-                </div>
-                
-                <!-- Input Area -->
-                <div class="message-input-container">
-                    <div class="input-buttons">
-                        <button id="emoji-btn" class="icon-btn" title="Emoji"><i class="far fa-smile"></i></button>
-                        <button id="attach-btn" class="icon-btn" title="Gambar"><i class="fas fa-image"></i></button>
-                    </div>
-                    <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="1"></textarea>
-                    <button id="send-btn" class="btn-send"><i class="fas fa-paper-plane"></i> Kirim</button>
-                </div>
-                <input type="file" id="image-upload" accept="image/*" style="display: none;">
+            <div class="message-input-container">
+                <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="2"></textarea>
+                <button id="send-btn" class="btn-send">Kirim</button>
             </div>
         </div>
     </div>
     
-    <!-- Audio untuk notifikasi -->
-    <audio id="notification-sound" preload="auto">
-        <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
-    </audio>
-    
-    <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="script.js"></script>
 </body>

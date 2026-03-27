@@ -4,26 +4,20 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// ============ VARIABEL GLOBAL ============
 let currentUser = null;
 let currentUserLanguage = 'id';
 let currentRoomId = 'public';
 let typingTimeout = null;
 let messagesSubscription = null;
-let typingSubscription = null;
 let onlineStatusInterval = null;
 
-// AVATAR DEFAULT (URL ONLINE - TIDAK PERLU FILE)
-const AVATAR_DEFAULT = 'https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40';
-
-// ============ FUNGSI DETEKSI BAHASA ============
+// ============ FUNGSI BANTUAN ============
 function detectLanguage(text) {
     if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text)) return 'ja';
     if (/^[a-zA-Z\s\.,!?0-9]+$/.test(text)) return 'en';
     return 'id';
 }
 
-// ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
     const sourceLang = detectLanguage(text);
@@ -56,20 +50,10 @@ function escapeHtml(text) {
 
 function playNotificationSound() {
     const audio = document.getElementById('notification-sound');
-    if (audio) audio.play().catch(() => {});
+    if (audio) audio.play().catch(e => console.log('Audio play failed'));
 }
 
-// ============ READ RECEIPT ============
-async function markMessageAsRead(messageId) {
-    if (!currentUser) return;
-    await supabaseClient
-        .from('messages')
-        .update({ is_read: true })
-        .eq('id', messageId)
-        .neq('user_id', currentUser.id);
-}
-
-// ============ GET PROFILE ============
+// ============ AMBIL PROFIL USER ============
 async function getProfile(userId) {
     const { data, error } = await supabaseClient
         .from('profiles')
@@ -82,18 +66,18 @@ async function getProfile(userId) {
 
 // ============ RENDER PESAN ============
 async function renderMessage(message) {
-    const container = document.getElementById('messages-container');
-    if (!container) return;
+    const messagesContainer = document.getElementById('messages-container');
+    if (!messagesContainer) return;
     
-    const isOwn = message.user_id === currentUser?.id;
-    const div = document.createElement('div');
-    div.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
-    div.setAttribute('data-message-id', message.id);
+    const isOwnMessage = message.user_id === currentUser?.id;
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
+    messageDiv.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    if (!isOwn) {
+    if (!isOwnMessage) {
         const translated = await translateText(message.original_message, currentUserLanguage);
         if (translated !== message.original_message) {
             displayText = translated;
@@ -101,24 +85,15 @@ async function renderMessage(message) {
         }
     }
     
-    const avatarUrl = message.avatar_url || AVATAR_DEFAULT;
+    const avatarUrl = message.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
     
-    div.innerHTML = `
-        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='${AVATAR_DEFAULT}'">
+    messageDiv.innerHTML = `
+        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='https://ui-avatars.com/api/?background=667eea&color=fff&size=40'">
         <div class="message-content-wrapper">
             <div class="message-bubble">
                 <div class="message-header">
                     <span class="username">${escapeHtml(message.username)}</span>
                     <span class="time">${formatTime(message.created_at)}</span>
-                    ${!isOwn ? '' : `
-                        <div class="read-receipt">
-                            ${message.is_read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>'}
-                        </div>
-                    `}
-                    <div class="message-actions">
-                        <button class="edit-msg" data-id="${message.id}"><i class="fas fa-edit"></i></button>
-                        <button class="delete-msg" data-id="${message.id}"><i class="fas fa-trash"></i></button>
-                    </div>
                 </div>
                 <div class="message-content">${escapeHtml(displayText)}</div>
                 ${message.image_url ? `<img class="message-image" src="${message.image_url}" alt="image">` : ''}
@@ -127,20 +102,18 @@ async function renderMessage(message) {
         </div>
     `;
     
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
-    
-    if (!isOwn) await markMessageAsRead(message.id);
+    messagesContainer.appendChild(messageDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 // ============ LOAD MESSAGES ============
 async function loadMessages() {
-    const container = document.getElementById('messages-container');
-    if (!container) return;
+    const messagesContainer = document.getElementById('messages-container');
+    if (!messagesContainer) return;
     
-    container.innerHTML = '<div class="loading-messages">Loading messages...</div>';
+    messagesContainer.innerHTML = '<div class="loading-messages">Loading messages...</div>';
     
-    const { data, error } = await supabaseClient
+    const { data: messages, error } = await supabaseClient
         .from('messages')
         .select('*')
         .eq('room_id', currentRoomId)
@@ -148,116 +121,90 @@ async function loadMessages() {
         .limit(100);
     
     if (error) {
-        container.innerHTML = '<div class="loading-messages">Error loading messages</div>';
+        messagesContainer.innerHTML = '<div class="loading-messages">Error loading messages</div>';
         return;
     }
     
-    container.innerHTML = '';
-    for (const msg of data) await renderMessage(msg);
+    messagesContainer.innerHTML = '';
+    for (const message of messages) {
+        await renderMessage(message);
+    }
 }
 
 // ============ SEND MESSAGE ============
-async function sendMessage(text, imageUrl = null) {
-    if ((!text.trim() && !imageUrl) || !currentUser) return;
+async function sendMessage(messageText, imageUrl = null) {
+    if ((!messageText.trim() && !imageUrl) || !currentUser) return;
     
     const profile = await getProfile(currentUser.id);
-    const avatar = profile?.avatar_url || AVATAR_DEFAULT;
-    const username = profile?.username || currentUser.email.split('@')[0];
     
-    const data = {
+    const messageData = {
         user_id: currentUser.id,
-        username: username,
-        original_message: text.trim() || '',
+        username: profile?.username || currentUser.email.split('@')[0],
+        original_message: messageText.trim() || '',
         room_id: currentRoomId,
         image_url: imageUrl,
-        avatar_url: avatar
+        avatar_url: profile?.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40'
     };
     
-    const { error } = await supabaseClient.from('messages').insert([data]);
-    if (error) alert('Gagal kirim: ' + error.message);
-}
-
-// ============ EDIT MESSAGE ============
-async function editMessage(id, newText) {
-    const { error } = await supabaseClient
-        .from('messages')
-        .update({ original_message: newText, edited_at: new Date() })
-        .eq('id', id)
-        .eq('user_id', currentUser.id);
-    if (error) alert('Gagal edit: ' + error.message);
-    else loadMessages();
-}
-
-// ============ DELETE MESSAGE ============
-async function deleteMessage(id) {
-    if (!confirm('Hapus pesan?')) return;
-    const { error } = await supabaseClient
-        .from('messages')
-        .delete()
-        .eq('id', id)
-        .eq('user_id', currentUser.id);
-    if (error) alert('Gagal hapus: ' + error.message);
-    else loadMessages();
+    const { error } = await supabaseClient.from('messages').insert([messageData]);
+    if (error) alert('Gagal mengirim pesan: ' + error.message);
 }
 
 // ============ UPLOAD GAMBAR ============
 async function uploadImage(file) {
-    const name = `${Date.now()}.${file.name.split('.').pop()}`;
-    const path = `chat-images/${name}`;
-    const { error } = await supabaseClient.storage.from('chat-images').upload(path, file);
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `chat-images/${fileName}`;
+    
+    const { error } = await supabaseClient.storage
+        .from('chat-images')
+        .upload(filePath, file);
+    
     if (error) {
         alert('Gagal upload: ' + error.message);
         return null;
     }
-    const { data } = supabaseClient.storage.from('chat-images').getPublicUrl(path);
+    
+    const { data } = supabaseClient.storage.from('chat-images').getPublicUrl(filePath);
     return data.publicUrl;
 }
 
-// ============ UPLOAD AVATAR ============
-async function uploadAvatar(file) {
-    const name = `${currentUser.id}-${Date.now()}.${file.name.split('.').pop()}`;
-    const path = `avatars/${name}`;
-    const { error } = await supabaseClient.storage.from('avatars').upload(path, file);
+// ============ LOAD USER LIST (DARI PROFILES) ============
+async function loadUserList() {
+    const userList = document.getElementById('user-list');
+    if (!userList) return;
+    
+    const { data: profiles, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .neq('id', currentUser?.id);
+    
     if (error) {
-        alert('Gagal upload avatar: ' + error.message);
-        return null;
+        console.error('Error:', error);
+        return;
     }
-    const { data } = supabaseClient.storage.from('avatars').getPublicUrl(path);
-    const url = data.publicUrl;
     
-    await supabaseClient.auth.updateUser({ data: { avatar_url: url } });
-    await supabaseClient.from('profiles').update({ avatar_url: url }).eq('id', currentUser.id);
-    
-    document.getElementById('current-avatar').src = url;
-    return url;
-}
-
-// ============ TYPING INDICATOR ============
-async function sendTyping() {
-    if (!currentUser) return;
-    const profile = await getProfile(currentUser.id);
-    await supabaseClient.channel('typing-channel').send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: {
-            user_id: currentUser.id,
-            username: profile?.username || currentUser.email.split('@')[0],
-            room_id: currentRoomId
-        }
+    userList.innerHTML = '';
+    profiles.forEach(profile => {
+        const userDiv = document.createElement('div');
+        userDiv.className = 'user-item';
+        userDiv.onclick = () => {
+            currentRoomId = `private_${[currentUser.id, profile.id].sort().join('_')}`;
+            document.getElementById('chat-room-name').innerText = `Chat with ${profile.username}`;
+            loadMessages();
+        };
+        userDiv.innerHTML = `
+            <img class="user-avatar-small" src="${profile.avatar_url}" alt="avatar" onerror="this.src='https://ui-avatars.com/api/?background=667eea&color=fff&size=40'">
+            <div class="user-info-sidebar">
+                <div class="user-name">${escapeHtml(profile.username)}</div>
+                <div class="user-status ${profile.online ? 'online' : 'offline'}">${profile.online ? 'Online' : 'Offline'}</div>
+            </div>
+        `;
+        userList.appendChild(userDiv);
     });
 }
 
-function showTyping(username) {
-    const el = document.getElementById('typing-indicator');
-    if (el) {
-        el.innerHTML = `<span>${username} mengetik...</span>`;
-        el.style.display = 'flex';
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => el.style.display = 'none', 2000);
-    }
-}
-
-// ============ ONLINE STATUS ============
+// ============ UPDATE ONLINE STATUS ============
 async function updateOnlineStatus() {
     if (!currentUser) return;
     await supabaseClient
@@ -266,70 +213,27 @@ async function updateOnlineStatus() {
         .eq('id', currentUser.id);
 }
 
-async function setOffline() {
-    if (!currentUser) return;
-    await supabaseClient.from('profiles').update({ online: false }).eq('id', currentUser.id);
-}
-
-// ============ LOAD USER LIST ============
-async function loadUserList() {
-    const el = document.getElementById('user-list');
-    if (!el) return;
-    
-    const { data: profiles, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .neq('id', currentUser?.id);
-    
-    if (error) return;
-    
-    el.innerHTML = '';
-    profiles.forEach(p => {
-        const div = document.createElement('div');
-        div.className = 'user-item';
-        div.onclick = () => {
-            const roomId = [currentUser.id, p.id].sort().join('_');
-            currentRoomId = `private_${roomId}`;
-            document.getElementById('chat-room-name').innerText = `Chat with ${p.username}`;
-            loadMessages();
-        };
-        div.innerHTML = `
-            <img class="user-avatar-small" src="${p.avatar_url || AVATAR_DEFAULT}" onerror="this.src='${AVATAR_DEFAULT}'">
-            <div class="user-info-sidebar">
-                <div class="user-name">${escapeHtml(p.username)}</div>
-                <div class="user-status ${p.online ? 'online' : 'offline'}">${p.online ? 'Online' : 'Offline'}</div>
-            </div>
-        `;
-        el.appendChild(div);
-    });
-}
-
-// ============ REALTIME ============
-function setupRealtime() {
+// ============ REALTIME SUBSCRIPTION ============
+function setupRealtimeSubscription() {
     if (messagesSubscription) messagesSubscription.unsubscribe();
-    if (typingSubscription) typingSubscription.unsubscribe();
     
     messagesSubscription = supabaseClient
-        .channel('messages')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
-            if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) playNotificationSound();
-            if (payload.new.room_id === currentRoomId) await renderMessage(payload.new);
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => loadMessages())
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => loadMessages())
-        .subscribe();
-    
-    typingSubscription = supabaseClient
-        .channel('typing')
-        .on('broadcast', { event: 'typing' }, (p) => {
-            if (p.payload.user_id !== currentUser?.id && p.payload.room_id === currentRoomId) {
-                showTyping(p.payload.username);
+        .channel('messages-channel')
+        .on('postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'messages' },
+            async (payload) => {
+                if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) {
+                    playNotificationSound();
+                }
+                if (payload.new.room_id === currentRoomId) {
+                    await renderMessage(payload.new);
+                }
             }
-        })
+        )
         .subscribe();
 }
 
-// ============ AUTH ============
+// ============ AUTH FUNCTIONS ============
 async function handleLogin(email, password) {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error) {
@@ -342,28 +246,33 @@ async function handleLogin(email, password) {
     currentUserLanguage = profile?.preferred_language || 'id';
     
     document.getElementById('user-language').value = currentUserLanguage;
-    document.getElementById('current-username').innerText = profile?.username || currentUser.email.split('@')[0];
-    document.getElementById('current-avatar').src = profile?.avatar_url || AVATAR_DEFAULT;
+    document.getElementById('current-username').textContent = profile?.username || currentUser.email.split('@')[0];
+    document.getElementById('current-avatar').src = profile?.avatar_url || 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
     document.getElementById('auth-container').style.display = 'none';
     document.getElementById('chat-container').style.display = 'flex';
     
     await loadUserList();
     await loadMessages();
-    setupRealtime();
+    setupRealtimeSubscription();
     updateOnlineStatus();
-    onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
+    setInterval(updateOnlineStatus, 30000);
     return true;
 }
 
 async function handleRegister(username, email, password, language, avatarFile) {
-    let avatarUrl = AVATAR_DEFAULT;
+    let avatarUrl = 'https://ui-avatars.com/api/?background=667eea&color=fff&size=40';
     
     if (avatarFile) {
-        const name = `${Date.now()}.${avatarFile.name.split('.').pop()}`;
-        const path = `avatars/${name}`;
-        const { error } = await supabaseClient.storage.from('avatars').upload(path, avatarFile);
+        const fileExt = avatarFile.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `avatars/${fileName}`;
+        
+        const { error } = await supabaseClient.storage
+            .from('avatars')
+            .upload(filePath, avatarFile);
+        
         if (!error) {
-            const { data } = supabaseClient.storage.from('avatars').getPublicUrl(path);
+            const { data } = supabaseClient.storage.from('avatars').getPublicUrl(filePath);
             avatarUrl = data.publicUrl;
         }
     }
@@ -389,40 +298,22 @@ async function handleRegister(username, email, password, language, avatarFile) {
 }
 
 async function handleLogout() {
-    await setOffline();
+    await supabaseClient
+        .from('profiles')
+        .update({ online: false })
+        .eq('id', currentUser.id);
+    
     await supabaseClient.auth.signOut();
-    if (onlineStatusInterval) clearInterval(onlineStatusInterval);
-    if (messagesSubscription) messagesSubscription.unsubscribe();
-    if (typingSubscription) typingSubscription.unsubscribe();
     currentUser = null;
+    if (messagesSubscription) messagesSubscription.unsubscribe();
+    
     document.getElementById('auth-container').style.display = 'flex';
     document.getElementById('chat-container').style.display = 'none';
 }
 
-// ============ EMOJI PICKER ============
-function createEmojiPicker() {
-    const picker = document.createElement('div');
-    picker.id = 'emoji-picker';
-    picker.className = 'emoji-picker';
-    const emojis = ['😀','😂','😍','🥰','😊','❤️','👍','🔥','🎉','😭','😱','🤔','🙏','💪','👋','😎','🥺','😡','🤣','😘'];
-    emojis.forEach(e => {
-        const span = document.createElement('span');
-        span.className = 'emoji-item';
-        span.textContent = e;
-        span.onclick = () => {
-            const input = document.getElementById('message-input');
-            input.value += e;
-            picker.classList.remove('active');
-        };
-        picker.appendChild(span);
-    });
-    document.querySelector('.message-input-container').appendChild(picker);
-    return picker;
-}
-
 // ============ EVENT LISTENERS ============
 document.addEventListener('DOMContentLoaded', () => {
-    // Tab
+    // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -444,30 +335,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Register
     document.getElementById('register-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const pass = document.getElementById('register-password').value;
-        if (pass.length < 6) return alert('Password minimal 6 karakter');
+        const password = document.getElementById('register-password').value;
+        if (password.length < 6) {
+            alert('Password minimal 6 karakter');
+            return;
+        }
         await handleRegister(
             document.getElementById('register-username').value,
             document.getElementById('register-email').value,
-            pass,
+            password,
             document.getElementById('register-language').value,
             document.getElementById('register-avatar').files[0]
         );
     });
     
-    // Send
+    // Send message
     document.getElementById('send-btn').addEventListener('click', async () => {
         const input = document.getElementById('message-input');
         await sendMessage(input.value);
         input.value = '';
-    });
-    
-    // Typing
-    let timer;
-    document.getElementById('message-input').addEventListener('input', () => {
-        clearTimeout(timer);
-        sendTyping();
-        timer = setTimeout(() => {}, 1000);
     });
     
     document.getElementById('message-input').addEventListener('keypress', async (e) => {
@@ -482,78 +368,43 @@ document.addEventListener('DOMContentLoaded', () => {
     // Logout
     document.getElementById('logout-btn').addEventListener('click', handleLogout);
     
-    // Language
+    // Language change
     document.getElementById('user-language').addEventListener('change', async (e) => {
         currentUserLanguage = e.target.value;
         if (currentUser) {
-            await supabaseClient.from('profiles').update({ preferred_language: currentUserLanguage }).eq('id', currentUser.id);
+            await supabaseClient
+                .from('profiles')
+                .update({ preferred_language: currentUserLanguage })
+                .eq('id', currentUser.id);
             loadMessages();
         }
     });
     
-    // Image upload
-    document.getElementById('attach-btn').addEventListener('click', () => document.getElementById('image-upload').click());
+    // Upload image
+    document.getElementById('attach-btn').addEventListener('click', () => {
+        document.getElementById('image-upload').click();
+    });
+    
     document.getElementById('image-upload').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (file) {
-            const url = await uploadImage(file);
-            if (url) await sendMessage('', url);
+            const imageUrl = await uploadImage(file);
+            if (imageUrl) await sendMessage('', imageUrl);
         }
         e.target.value = '';
     });
     
-    // Avatar upload
-    document.getElementById('change-avatar-btn').addEventListener('click', () => document.getElementById('avatar-upload').click());
-    document.getElementById('avatar-upload').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (file) await uploadAvatar(file);
-        e.target.value = '';
-    });
-    
-    // Emoji
-    document.getElementById('emoji-btn').addEventListener('click', () => {
-        const picker = document.getElementById('emoji-picker') || createEmojiPicker();
-        picker.classList.toggle('active');
-    });
-    
-    // Edit/Delete
-    document.getElementById('messages-container').addEventListener('click', async (e) => {
-        const edit = e.target.closest('.edit-msg');
-        const del = e.target.closest('.delete-msg');
-        if (edit) {
-            const id = edit.dataset.id;
-            const newText = prompt('Edit pesan:');
-            if (newText) await editMessage(id, newText);
-        }
-        if (del) {
-            const id = del.dataset.id;
-            await deleteMessage(id);
-        }
-    });
-    
-    // Public chat
+    // Back to public chat
     document.getElementById('new-chat-btn').addEventListener('click', () => {
         currentRoomId = 'public';
         document.getElementById('chat-room-name').innerText = 'Public Chat';
         loadMessages();
     });
     
-    // Check session
-    supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
+    // Check existing session
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
         if (session) {
-            currentUser = session.user;
-            const profile = await getProfile(currentUser.id);
-            currentUserLanguage = profile?.preferred_language || 'id';
-            document.getElementById('auth-container').style.display = 'none';
-            document.getElementById('chat-container').style.display = 'flex';
-            document.getElementById('current-username').innerText = profile?.username || currentUser.email.split('@')[0];
-            document.getElementById('current-avatar').src = profile?.avatar_url || AVATAR_DEFAULT;
-            document.getElementById('user-language').value = currentUserLanguage;
-            await loadUserList();
-            await loadMessages();
-            setupRealtime();
-            updateOnlineStatus();
-            onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
+            handleLogin(session.user.email, '');
         }
     });
 });
