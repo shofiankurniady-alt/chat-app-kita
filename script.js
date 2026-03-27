@@ -12,10 +12,9 @@ let typingTimeout = null;
 let messagesSubscription = null;
 let typingSubscription = null;
 let onlineStatusInterval = null;
-let emojiPickerActive = false;
 
-// PLACEHOLDER AVATAR
-const DEFAULT_AVATAR = 'https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40';
+// AVATAR DEFAULT (URL ONLINE - TIDAK PERLU FILE)
+const AVATAR_DEFAULT = 'https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40';
 
 // ============ FUNGSI DETEKSI BAHASA ============
 function detectLanguage(text) {
@@ -27,7 +26,6 @@ function detectLanguage(text) {
 // ============ FUNGSI TERJEMAHAN ============
 async function translateText(text, targetLang) {
     if (!text || !targetLang) return text;
-    
     const sourceLang = detectLanguage(text);
     if (sourceLang === targetLang) return text;
     
@@ -35,7 +33,6 @@ async function translateText(text, targetLang) {
         const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${sourceLang}|${targetLang}`;
         const response = await fetch(url);
         const data = await response.json();
-        
         if (data.responseData && data.responseData.translatedText) {
             let translated = data.responseData.translatedText;
             if (translated.includes('INVALID') || translated.includes('NO CONTENT')) return text;
@@ -47,10 +44,8 @@ async function translateText(text, targetLang) {
     }
 }
 
-// ============ FUNGSI BANTUAN ============
 function formatTime(timestamp) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    return new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
@@ -61,9 +56,7 @@ function escapeHtml(text) {
 
 function playNotificationSound() {
     const audio = document.getElementById('notification-sound');
-    if (audio) {
-        audio.play().catch(e => console.log('Audio play failed:', e));
-    }
+    if (audio) audio.play().catch(() => {});
 }
 
 // ============ READ RECEIPT ============
@@ -76,20 +69,31 @@ async function markMessageAsRead(messageId) {
         .neq('user_id', currentUser.id);
 }
 
+// ============ GET PROFILE ============
+async function getProfile(userId) {
+    const { data, error } = await supabaseClient
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+    if (error) return null;
+    return data;
+}
+
 // ============ RENDER PESAN ============
 async function renderMessage(message) {
-    const messagesContainer = document.getElementById('messages-container');
-    if (!messagesContainer) return;
+    const container = document.getElementById('messages-container');
+    if (!container) return;
     
-    const isOwnMessage = message.user_id === currentUser?.id;
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${isOwnMessage ? 'message-own' : 'message-other'}`;
-    messageDiv.setAttribute('data-message-id', message.id);
+    const isOwn = message.user_id === currentUser?.id;
+    const div = document.createElement('div');
+    div.className = `message ${isOwn ? 'message-own' : 'message-other'}`;
+    div.setAttribute('data-message-id', message.id);
     
     let displayText = message.original_message;
     let showOriginal = false;
     
-    if (!isOwnMessage) {
+    if (!isOwn) {
         const translated = await translateText(message.original_message, currentUserLanguage);
         if (translated !== message.original_message) {
             displayText = translated;
@@ -97,16 +101,16 @@ async function renderMessage(message) {
         }
     }
     
-    const avatarUrl = message.avatar_url || DEFAULT_AVATAR;
+    const avatarUrl = message.avatar_url || AVATAR_DEFAULT;
     
-    messageDiv.innerHTML = `
-        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='${DEFAULT_AVATAR}'">
+    div.innerHTML = `
+        <img class="message-avatar" src="${avatarUrl}" alt="avatar" onerror="this.src='${AVATAR_DEFAULT}'">
         <div class="message-content-wrapper">
             <div class="message-bubble">
                 <div class="message-header">
                     <span class="username">${escapeHtml(message.username)}</span>
                     <span class="time">${formatTime(message.created_at)}</span>
-                    ${!isOwnMessage ? '' : `
+                    ${!isOwn ? '' : `
                         <div class="read-receipt">
                             ${message.is_read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>'}
                         </div>
@@ -123,22 +127,20 @@ async function renderMessage(message) {
         </div>
     `;
     
-    messagesContainer.appendChild(messageDiv);
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
     
-    if (!isOwnMessage) {
-        await markMessageAsRead(message.id);
-    }
+    if (!isOwn) await markMessageAsRead(message.id);
 }
 
 // ============ LOAD MESSAGES ============
 async function loadMessages() {
-    const messagesContainer = document.getElementById('messages-container');
-    if (!messagesContainer) return;
+    const container = document.getElementById('messages-container');
+    if (!container) return;
     
-    messagesContainer.innerHTML = '<div class="loading-messages">Loading messages...</div>';
+    container.innerHTML = '<div class="loading-messages">Loading messages...</div>';
     
-    const { data: messages, error } = await supabaseClient
+    const { data, error } = await supabaseClient
         .from('messages')
         .select('*')
         .eq('room_id', currentRoomId)
@@ -146,260 +148,188 @@ async function loadMessages() {
         .limit(100);
     
     if (error) {
-        messagesContainer.innerHTML = '<div class="loading-messages">Error loading messages</div>';
+        container.innerHTML = '<div class="loading-messages">Error loading messages</div>';
         return;
     }
     
-    messagesContainer.innerHTML = '';
-    for (const message of messages) {
-        await renderMessage(message);
-    }
+    container.innerHTML = '';
+    for (const msg of data) await renderMessage(msg);
 }
 
 // ============ SEND MESSAGE ============
-async function sendMessage(messageText, imageUrl = null) {
-    if ((!messageText.trim() && !imageUrl) || !currentUser) return;
+async function sendMessage(text, imageUrl = null) {
+    if ((!text.trim() && !imageUrl) || !currentUser) return;
     
-    const messageData = {
+    const profile = await getProfile(currentUser.id);
+    const avatar = profile?.avatar_url || AVATAR_DEFAULT;
+    const username = profile?.username || currentUser.email.split('@')[0];
+    
+    const data = {
         user_id: currentUser.id,
-        username: currentUser.user_metadata?.display_name || currentUser.email.split('@')[0],
-        original_message: messageText.trim() || '',
+        username: username,
+        original_message: text.trim() || '',
         room_id: currentRoomId,
         image_url: imageUrl,
-        avatar_url: currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR
+        avatar_url: avatar
     };
     
-    const { error } = await supabaseClient.from('messages').insert([messageData]);
-    if (error) alert('Gagal mengirim pesan: ' + error.message);
+    const { error } = await supabaseClient.from('messages').insert([data]);
+    if (error) alert('Gagal kirim: ' + error.message);
 }
 
 // ============ EDIT MESSAGE ============
-async function editMessage(messageId, newText) {
+async function editMessage(id, newText) {
     const { error } = await supabaseClient
         .from('messages')
         .update({ original_message: newText, edited_at: new Date() })
-        .eq('id', messageId)
+        .eq('id', id)
         .eq('user_id', currentUser.id);
-    
-    if (error) alert('Gagal edit pesan: ' + error.message);
+    if (error) alert('Gagal edit: ' + error.message);
     else loadMessages();
 }
 
 // ============ DELETE MESSAGE ============
-async function deleteMessage(messageId) {
-    if (!confirm('Hapus pesan ini?')) return;
+async function deleteMessage(id) {
+    if (!confirm('Hapus pesan?')) return;
     const { error } = await supabaseClient
         .from('messages')
         .delete()
-        .eq('id', messageId)
+        .eq('id', id)
         .eq('user_id', currentUser.id);
-    
-    if (error) alert('Gagal hapus pesan: ' + error.message);
+    if (error) alert('Gagal hapus: ' + error.message);
     else loadMessages();
 }
 
 // ============ UPLOAD GAMBAR ============
 async function uploadImage(file) {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `chat-images/${fileName}`;
-    
-    const { error } = await supabaseClient.storage
-        .from('chat-images')
-        .upload(filePath, file);
-    
+    const name = `${Date.now()}.${file.name.split('.').pop()}`;
+    const path = `chat-images/${name}`;
+    const { error } = await supabaseClient.storage.from('chat-images').upload(path, file);
     if (error) {
-        alert('Gagal upload gambar: ' + error.message);
+        alert('Gagal upload: ' + error.message);
         return null;
     }
-    
-    const { data } = supabaseClient.storage
-        .from('chat-images')
-        .getPublicUrl(filePath);
-    
+    const { data } = supabaseClient.storage.from('chat-images').getPublicUrl(path);
     return data.publicUrl;
 }
 
 // ============ UPLOAD AVATAR ============
 async function uploadAvatar(file) {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${currentUser.id}-${Date.now()}.${fileExt}`;
-    const filePath = `avatars/${fileName}`;
-    
-    const { error } = await supabaseClient.storage
-        .from('avatars')
-        .upload(filePath, file);
-    
+    const name = `${currentUser.id}-${Date.now()}.${file.name.split('.').pop()}`;
+    const path = `avatars/${name}`;
+    const { error } = await supabaseClient.storage.from('avatars').upload(path, file);
     if (error) {
         alert('Gagal upload avatar: ' + error.message);
         return null;
     }
+    const { data } = supabaseClient.storage.from('avatars').getPublicUrl(path);
+    const url = data.publicUrl;
     
-    const { data } = supabaseClient.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
+    await supabaseClient.auth.updateUser({ data: { avatar_url: url } });
+    await supabaseClient.from('profiles').update({ avatar_url: url }).eq('id', currentUser.id);
     
-    const avatarUrl = data.publicUrl;
-    
-    // Update di auth user metadata
-    await supabaseClient.auth.updateUser({
-        data: { avatar_url: avatarUrl }
-    });
-    
-    // Update di tabel profiles
-    await supabaseClient
-        .from('profiles')
-        .update({ avatar_url: avatarUrl })
-        .eq('id', currentUser.id);
-    
-    document.getElementById('current-avatar').src = avatarUrl;
-    return avatarUrl;
+    document.getElementById('current-avatar').src = url;
+    return url;
 }
 
 // ============ TYPING INDICATOR ============
-async function sendTypingIndicator() {
+async function sendTyping() {
     if (!currentUser) return;
-    
-    await supabaseClient
-        .channel('typing-channel')
-        .send({
-            type: 'broadcast',
-            event: 'typing',
-            payload: {
-                user_id: currentUser.id,
-                username: currentUser.user_metadata?.display_name,
-                room_id: currentRoomId,
-                is_typing: true
-            }
-        });
+    const profile = await getProfile(currentUser.id);
+    await supabaseClient.channel('typing-channel').send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+            user_id: currentUser.id,
+            username: profile?.username || currentUser.email.split('@')[0],
+            room_id: currentRoomId
+        }
+    });
 }
 
-function showTypingIndicator(username) {
-    const indicator = document.getElementById('typing-indicator');
-    if (indicator) {
-        indicator.innerHTML = `<span>${username} sedang mengetik...</span>`;
-        indicator.style.display = 'flex';
+function showTyping(username) {
+    const el = document.getElementById('typing-indicator');
+    if (el) {
+        el.innerHTML = `<span>${username} mengetik...</span>`;
+        el.style.display = 'flex';
         clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-            indicator.style.display = 'none';
-        }, 2000);
+        typingTimeout = setTimeout(() => el.style.display = 'none', 2000);
     }
 }
 
-// ============ ONLINE STATUS (Pakai tabel profiles) ============
+// ============ ONLINE STATUS ============
 async function updateOnlineStatus() {
     if (!currentUser) return;
     await supabaseClient
         .from('profiles')
-        .update({ 
-            online: true, 
-            last_seen: new Date().toISOString() 
-        })
+        .update({ online: true, last_seen: new Date().toISOString() })
         .eq('id', currentUser.id);
 }
 
-async function setUserOffline() {
+async function setOffline() {
     if (!currentUser) return;
-    await supabaseClient
-        .from('profiles')
-        .update({ online: false })
-        .eq('id', currentUser.id);
+    await supabaseClient.from('profiles').update({ online: false }).eq('id', currentUser.id);
 }
 
-function startOnlineStatusTracking() {
-    updateOnlineStatus();
-    onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
-}
-
-// ============ PRIVATE CHAT ============
-async function startPrivateChat(targetUserId) {
-    const roomId = [currentUser.id, targetUserId].sort().join('_');
-    currentRoomId = `private_${roomId}`;
-    document.getElementById('chat-room-name').innerText = 'Private Chat';
-    await loadMessages();
-}
-
-// ============ LOAD USER LIST (Dari tabel profiles) ============
+// ============ LOAD USER LIST ============
 async function loadUserList() {
-    const userList = document.getElementById('user-list');
-    if (!userList) return;
+    const el = document.getElementById('user-list');
+    if (!el) return;
     
     const { data: profiles, error } = await supabaseClient
         .from('profiles')
         .select('*')
         .neq('id', currentUser?.id);
     
-    if (error) {
-        console.error('Error loading users:', error);
-        return;
-    }
+    if (error) return;
     
-    userList.innerHTML = '';
-    profiles.forEach(profile => {
-        const userDiv = document.createElement('div');
-        userDiv.className = 'user-item';
-        userDiv.onclick = () => startPrivateChat(profile.id);
-        userDiv.innerHTML = `
-            <img class="user-avatar-small" src="${profile.avatar_url || DEFAULT_AVATAR}" alt="avatar" onerror="this.src='${DEFAULT_AVATAR}'">
+    el.innerHTML = '';
+    profiles.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'user-item';
+        div.onclick = () => {
+            const roomId = [currentUser.id, p.id].sort().join('_');
+            currentRoomId = `private_${roomId}`;
+            document.getElementById('chat-room-name').innerText = `Chat with ${p.username}`;
+            loadMessages();
+        };
+        div.innerHTML = `
+            <img class="user-avatar-small" src="${p.avatar_url || AVATAR_DEFAULT}" onerror="this.src='${AVATAR_DEFAULT}'">
             <div class="user-info-sidebar">
-                <div class="user-name">${escapeHtml(profile.username)}</div>
-                <div class="user-status ${profile.online ? 'online' : 'offline'}">${profile.online ? 'Online' : 'Offline'}</div>
+                <div class="user-name">${escapeHtml(p.username)}</div>
+                <div class="user-status ${p.online ? 'online' : 'offline'}">${p.online ? 'Online' : 'Offline'}</div>
             </div>
         `;
-        userList.appendChild(userDiv);
+        el.appendChild(div);
     });
 }
 
-// ============ REALTIME SUBSCRIPTIONS ============
-function setupRealtimeSubscriptions() {
+// ============ REALTIME ============
+function setupRealtime() {
     if (messagesSubscription) messagesSubscription.unsubscribe();
     if (typingSubscription) typingSubscription.unsubscribe();
     
     messagesSubscription = supabaseClient
-        .channel('messages-channel')
-        .on('postgres_changes', 
-            { event: 'INSERT', schema: 'public', table: 'messages' },
-            async (payload) => {
-                if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) {
-                    playNotificationSound();
-                }
-                if (payload.new.room_id === currentRoomId) {
-                    await renderMessage(payload.new);
-                }
-            }
-        )
-        .on('postgres_changes',
-            { event: 'UPDATE', schema: 'public', table: 'messages' },
-            () => loadMessages()
-        )
-        .on('postgres_changes',
-            { event: 'DELETE', schema: 'public', table: 'messages' },
-            () => loadMessages()
-        )
+        .channel('messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+            if (payload.new.user_id !== currentUser?.id && payload.new.room_id === currentRoomId) playNotificationSound();
+            if (payload.new.room_id === currentRoomId) await renderMessage(payload.new);
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => loadMessages())
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, () => loadMessages())
         .subscribe();
     
     typingSubscription = supabaseClient
-        .channel('typing-channel')
-        .on('broadcast', { event: 'typing' }, (payload) => {
-            if (payload.payload.user_id !== currentUser?.id && payload.payload.room_id === currentRoomId) {
-                showTypingIndicator(payload.payload.username);
+        .channel('typing')
+        .on('broadcast', { event: 'typing' }, (p) => {
+            if (p.payload.user_id !== currentUser?.id && p.payload.room_id === currentRoomId) {
+                showTyping(p.payload.username);
             }
         })
         .subscribe();
 }
 
-// ============ GET PROFILE ============
-async function getProfile(userId) {
-    const { data, error } = await supabaseClient
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-    if (error) return null;
-    return data;
-}
-
-// ============ AUTH FUNCTIONS ============
+// ============ AUTH ============
 async function handleLogin(email, password) {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error) {
@@ -409,35 +339,31 @@ async function handleLogin(email, password) {
     
     currentUser = data.user;
     const profile = await getProfile(currentUser.id);
-    currentUserLanguage = profile?.preferred_language || currentUser.user_metadata?.preferred_language || 'id';
+    currentUserLanguage = profile?.preferred_language || 'id';
     
     document.getElementById('user-language').value = currentUserLanguage;
-    document.getElementById('current-username').textContent = profile?.username || currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-    document.getElementById('current-avatar').src = profile?.avatar_url || currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR;
+    document.getElementById('current-username').innerText = profile?.username || currentUser.email.split('@')[0];
+    document.getElementById('current-avatar').src = profile?.avatar_url || AVATAR_DEFAULT;
     document.getElementById('auth-container').style.display = 'none';
     document.getElementById('chat-container').style.display = 'flex';
     
     await loadUserList();
     await loadMessages();
-    setupRealtimeSubscriptions();
-    startOnlineStatusTracking();
+    setupRealtime();
+    updateOnlineStatus();
+    onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
     return true;
 }
 
 async function handleRegister(username, email, password, language, avatarFile) {
-    let avatarUrl = DEFAULT_AVATAR;
+    let avatarUrl = AVATAR_DEFAULT;
     
     if (avatarFile) {
-        const fileExt = avatarFile.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `avatars/${fileName}`;
-        
-        const { error: uploadError } = await supabaseClient.storage
-            .from('avatars')
-            .upload(filePath, avatarFile);
-        
-        if (!uploadError) {
-            const { data } = supabaseClient.storage.from('avatars').getPublicUrl(filePath);
+        const name = `${Date.now()}.${avatarFile.name.split('.').pop()}`;
+        const path = `avatars/${name}`;
+        const { error } = await supabaseClient.storage.from('avatars').upload(path, avatarFile);
+        if (!error) {
+            const { data } = supabaseClient.storage.from('avatars').getPublicUrl(path);
             avatarUrl = data.publicUrl;
         }
     }
@@ -463,7 +389,7 @@ async function handleRegister(username, email, password, language, avatarFile) {
 }
 
 async function handleLogout() {
-    await setUserOffline();
+    await setOffline();
     await supabaseClient.auth.signOut();
     if (onlineStatusInterval) clearInterval(onlineStatusInterval);
     if (messagesSubscription) messagesSubscription.unsubscribe();
@@ -473,19 +399,19 @@ async function handleLogout() {
     document.getElementById('chat-container').style.display = 'none';
 }
 
-// ============ CREATE EMOJI PICKER ============
+// ============ EMOJI PICKER ============
 function createEmojiPicker() {
     const picker = document.createElement('div');
     picker.id = 'emoji-picker';
     picker.className = 'emoji-picker';
-    const emojis = ['😀', '😂', '😍', '🥰', '😊', '❤️', '👍', '🔥', '🎉', '😭', '😱', '🤔', '🙏', '💪', '👋', '😎', '🥺', '😡', '🤣', '😘'];
-    emojis.forEach(emoji => {
+    const emojis = ['😀','😂','😍','🥰','😊','❤️','👍','🔥','🎉','😭','😱','🤔','🙏','💪','👋','😎','🥺','😡','🤣','😘'];
+    emojis.forEach(e => {
         const span = document.createElement('span');
         span.className = 'emoji-item';
-        span.textContent = emoji;
+        span.textContent = e;
         span.onclick = () => {
             const input = document.getElementById('message-input');
-            input.value += emoji;
+            input.value += e;
             picker.classList.remove('active');
         };
         picker.appendChild(span);
@@ -496,7 +422,7 @@ function createEmojiPicker() {
 
 // ============ EVENT LISTENERS ============
 document.addEventListener('DOMContentLoaded', () => {
-    // Tab switching
+    // Tab
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -515,36 +441,33 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     });
     
-    // Register with avatar
+    // Register
     document.getElementById('register-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const password = document.getElementById('register-password').value;
-        if (password.length < 6) {
-            alert('Password minimal 6 karakter');
-            return;
-        }
+        const pass = document.getElementById('register-password').value;
+        if (pass.length < 6) return alert('Password minimal 6 karakter');
         await handleRegister(
             document.getElementById('register-username').value,
             document.getElementById('register-email').value,
-            password,
+            pass,
             document.getElementById('register-language').value,
             document.getElementById('register-avatar').files[0]
         );
     });
     
-    // Send message
+    // Send
     document.getElementById('send-btn').addEventListener('click', async () => {
         const input = document.getElementById('message-input');
         await sendMessage(input.value);
         input.value = '';
     });
     
-    // Typing indicator
-    let typingTimer;
+    // Typing
+    let timer;
     document.getElementById('message-input').addEventListener('input', () => {
-        clearTimeout(typingTimer);
-        sendTypingIndicator();
-        typingTimer = setTimeout(() => {}, 1000);
+        clearTimeout(timer);
+        sendTyping();
+        timer = setTimeout(() => {}, 1000);
     });
     
     document.getElementById('message-input').addEventListener('keypress', async (e) => {
@@ -559,68 +482,56 @@ document.addEventListener('DOMContentLoaded', () => {
     // Logout
     document.getElementById('logout-btn').addEventListener('click', handleLogout);
     
-    // Language change
+    // Language
     document.getElementById('user-language').addEventListener('change', async (e) => {
         currentUserLanguage = e.target.value;
         if (currentUser) {
-            await supabaseClient
-                .from('profiles')
-                .update({ preferred_language: currentUserLanguage })
-                .eq('id', currentUser.id);
-            await supabaseClient.auth.updateUser({ data: { preferred_language: currentUserLanguage } });
+            await supabaseClient.from('profiles').update({ preferred_language: currentUserLanguage }).eq('id', currentUser.id);
             loadMessages();
         }
     });
     
-    // Upload image
-    document.getElementById('attach-btn').addEventListener('click', () => {
-        document.getElementById('image-upload').click();
-    });
-    
+    // Image upload
+    document.getElementById('attach-btn').addEventListener('click', () => document.getElementById('image-upload').click());
     document.getElementById('image-upload').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (file) {
-            const imageUrl = await uploadImage(file);
-            if (imageUrl) await sendMessage('', imageUrl);
+            const url = await uploadImage(file);
+            if (url) await sendMessage('', url);
         }
         e.target.value = '';
     });
     
-    // Change avatar
-    document.getElementById('change-avatar-btn').addEventListener('click', () => {
-        document.getElementById('avatar-upload').click();
-    });
-    
+    // Avatar upload
+    document.getElementById('change-avatar-btn').addEventListener('click', () => document.getElementById('avatar-upload').click());
     document.getElementById('avatar-upload').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (file) await uploadAvatar(file);
         e.target.value = '';
     });
     
-    // Emoji picker
+    // Emoji
     document.getElementById('emoji-btn').addEventListener('click', () => {
         const picker = document.getElementById('emoji-picker') || createEmojiPicker();
         picker.classList.toggle('active');
     });
     
-    // Edit/Delete via event delegation
+    // Edit/Delete
     document.getElementById('messages-container').addEventListener('click', async (e) => {
-        const editBtn = e.target.closest('.edit-msg');
-        const deleteBtn = e.target.closest('.delete-msg');
-        
-        if (editBtn) {
-            const messageId = editBtn.dataset.id;
+        const edit = e.target.closest('.edit-msg');
+        const del = e.target.closest('.delete-msg');
+        if (edit) {
+            const id = edit.dataset.id;
             const newText = prompt('Edit pesan:');
-            if (newText) await editMessage(messageId, newText);
+            if (newText) await editMessage(id, newText);
         }
-        
-        if (deleteBtn) {
-            const messageId = deleteBtn.dataset.id;
-            await deleteMessage(messageId);
+        if (del) {
+            const id = del.dataset.id;
+            await deleteMessage(id);
         }
     });
     
-    // New public chat
+    // Public chat
     document.getElementById('new-chat-btn').addEventListener('click', () => {
         currentRoomId = 'public';
         document.getElementById('chat-room-name').innerText = 'Public Chat';
@@ -632,16 +543,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (session) {
             currentUser = session.user;
             const profile = await getProfile(currentUser.id);
-            currentUserLanguage = profile?.preferred_language || currentUser.user_metadata?.preferred_language || 'id';
+            currentUserLanguage = profile?.preferred_language || 'id';
             document.getElementById('auth-container').style.display = 'none';
             document.getElementById('chat-container').style.display = 'flex';
-            document.getElementById('current-username').textContent = profile?.username || currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
-            document.getElementById('current-avatar').src = profile?.avatar_url || currentUser.user_metadata?.avatar_url || DEFAULT_AVATAR;
+            document.getElementById('current-username').innerText = profile?.username || currentUser.email.split('@')[0];
+            document.getElementById('current-avatar').src = profile?.avatar_url || AVATAR_DEFAULT;
             document.getElementById('user-language').value = currentUserLanguage;
             await loadUserList();
             await loadMessages();
-            setupRealtimeSubscriptions();
-            startOnlineStatusTracking();
+            setupRealtime();
+            updateOnlineStatus();
+            onlineStatusInterval = setInterval(updateOnlineStatus, 30000);
         }
     });
 });

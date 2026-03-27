@@ -2,14 +2,14 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Real-time Chat App</title>
     <link rel="stylesheet" href="style.css">
     <!-- Font Awesome 6 (Icons) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Emoji Picker Library (untuk fitur emoji) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/emojis/0.1.0/emojis.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/emojis/0.1.0/emojis.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -73,7 +73,7 @@
             <!-- Header -->
             <div class="chat-header">
                 <div class="user-info">
-                    <img id="current-avatar" class="avatar-small" src="default-avatar.png" alt="avatar">
+                    <img id="current-avatar" class="avatar-small" src="https://ui-avatars.com/api/?background=667eea&color=fff&bold=true&size=40" alt="avatar">
                     <span id="current-username"></span>
                     <span id="online-status-dot" class="online-dot"></span>
                 </div>
@@ -84,7 +84,7 @@
                             <i class="fas fa-language"></i>
                             <select id="user-language">
                                 <option value="id">Bahasa Indonesia</option>
-                                <option value="ja">日本語 (Japanese)</option>
+                                <option value="ja">日本語</option>
                                 <option value="en">English</option>
                                 <option value="zh">中文</option>
                             </select>
@@ -103,36 +103,40 @@
             <!-- Sidebar untuk Private Chat (daftar user) -->
             <div class="chat-sidebar" id="chat-sidebar">
                 <div class="sidebar-header">
-                    <span>Chats</span>
-                    <button id="new-chat-btn" class="icon-btn"><i class="fas fa-plus"></i></button>
+                    <span><i class="fas fa-comments"></i> Chats</span>
+                    <button id="new-chat-btn" class="icon-btn" title="Public Chat"><i class="fas fa-globe"></i></button>
                 </div>
                 <div id="user-list" class="user-list">
-                    <!-- Daftar user online akan diisi oleh JS -->
+                    <div class="loading-users">Loading users...</div>
                 </div>
             </div>
             
             <!-- Area Pesan -->
             <div class="chat-main">
                 <div class="chat-info" id="chat-info">
+                    <i class="fas fa-hashtag"></i>
                     <span id="chat-room-name">Public Chat</span>
                 </div>
                 <div id="messages-container" class="messages-container">
-                    <div class="loading-messages">Loading messages...</div>
+                    <div class="loading-messages">
+                        <i class="fas fa-spinner fa-spin"></i> Loading messages...
+                    </div>
                 </div>
                 
                 <!-- Typing Indicator -->
                 <div id="typing-indicator" class="typing-indicator" style="display: none;">
+                    <i class="fas fa-pencil-alt"></i>
                     <span>Someone is typing...</span>
                 </div>
                 
                 <!-- Input Area -->
                 <div class="message-input-container">
                     <div class="input-buttons">
-                        <button id="emoji-btn" class="icon-btn" title="Emoji"><i class="fas fa-smile"></i></button>
+                        <button id="emoji-btn" class="icon-btn" title="Emoji"><i class="far fa-smile"></i></button>
                         <button id="attach-btn" class="icon-btn" title="Gambar"><i class="fas fa-image"></i></button>
                     </div>
-                    <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="2"></textarea>
-                    <button id="send-btn" class="btn-send">Kirim</button>
+                    <textarea id="message-input" placeholder="Ketik pesan... (Enter untuk kirim)" rows="1"></textarea>
+                    <button id="send-btn" class="btn-send"><i class="fas fa-paper-plane"></i> Kirim</button>
                 </div>
                 <input type="file" id="image-upload" accept="image/*" style="display: none;">
             </div>
@@ -140,7 +144,9 @@
     </div>
     
     <!-- Audio untuk notifikasi -->
-    <audio id="notification-sound" src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" preload="auto"></audio>
+    <audio id="notification-sound" preload="auto">
+        <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
+    </audio>
     
     <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
