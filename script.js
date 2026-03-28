@@ -12,6 +12,14 @@ let activeAction = null; // 'delete' atau 'revoke'
 let onlineStatusInterval = null;
 let currentMood = '😊';
 
+// ============ LAST SEEN VARIABLES ============
+let lastSeenInterval = null;
+
+// ============ TYPING INDICATOR VARIABLES ============
+let typingChannel = null;
+let typingTimeout = null;
+let currentReplyTo = null;
+
 // ============ SELECT MODE VARIABLES ============
 let selectMode = false;
 let selectedMessages = new Set();
@@ -105,6 +113,34 @@ async function getProfile(userId) {
     return data;
 }
 
+// ============ LAST SEEN ============
+function startLastSeenTracking() {
+    if (lastSeenInterval) clearInterval(lastSeenInterval);
+    updateLastSeen();
+    lastSeenInterval = setInterval(updateLastSeen, 30000);
+}
+
+async function updateLastSeen() {
+    if (!currentUser) return;
+    
+    await supabaseClient
+        .from('profiles')
+        .update({ last_seen: new Date().toISOString() })
+        .eq('id', currentUser.id);
+}
+
+function formatLastSeen(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) return 'Baru saja';
+    if (diffMins < 60) return `${diffMins} menit lalu`;
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)} jam lalu`;
+    return date.toLocaleDateString('id-ID');
+}
+
 // ============ UPDATE ONLINE STATUS ============
 async function updateOnlineStatus() {
     if (!currentUser) return;
@@ -160,6 +196,69 @@ async function updateMood(mood) {
     if (error) {
         console.error('Error updating mood:', error);
     }
+}
+
+// ============ TYPING INDICATOR ============
+async function sendTypingIndicator() {
+    if (!currentUser || !typingChannel) return;
+    
+    const latestUsername = currentUser.user_metadata?.display_name || currentUser.email.split('@')[0];
+    
+    await typingChannel.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+            user_id: currentUser.id,
+            username: latestUsername,
+            is_typing: true
+        }
+    });
+}
+
+function showTypingIndicator(username) {
+    const container = document.getElementById('typing-indicator-container');
+    const userNameSpan = document.getElementById('typing-user-name');
+    if (container && userNameSpan) {
+        userNameSpan.textContent = username;
+        container.style.display = 'flex';
+        if (typingTimeout) clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+            container.style.display = 'none';
+        }, 2000);
+    }
+}
+
+// ============ REPLY PESAN ============
+function showReplyPreview(message) {
+    currentReplyTo = {
+        id: message.id,
+        username: message.username,
+        text: message.original_message.substring(0, 100)
+    };
+    
+    const previewDiv = document.getElementById('reply-preview');
+    const previewText = document.getElementById('reply-preview-text');
+    if (previewDiv && previewText) {
+        previewText.innerHTML = `<i class="fas fa-reply"></i> Membalas ${escapeHtml(currentReplyTo.username)}: ${escapeHtml(currentReplyTo.text)}`;
+        previewDiv.style.display = 'block';
+    }
+}
+
+function cancelReply() {
+    currentReplyTo = null;
+    const previewDiv = document.getElementById('reply-preview');
+    if (previewDiv) previewDiv.style.display = 'none';
+}
+
+// ============ READ RECEIPT ============
+async function markMessageAsRead(messageId) {
+    if (!currentUser) return;
+    
+    await supabaseClient
+        .from('messages')
+        .update({ is_read: true })
+        .eq('id', messageId)
+        .neq('user_id', currentUser.id);
 }
 
 // ============ EMOJI PICKER FUNCTION ============
@@ -285,7 +384,7 @@ async function updateAllMessagesUsername() {
     }
 }
 
-// ============ RENDER MESSAGE ============
+// ============ RENDER MESSAGE (DENGAN REPLY & READ RECEIPT) ============
 async function renderMessage(message) {
     const messagesContainer = document.getElementById('messages-container');
     if (!messagesContainer) return;
@@ -304,20 +403,54 @@ async function renderMessage(message) {
         showOriginal = true;
     }
     
+    // Render reply jika ada
+    let replyHtml = '';
+    if (message.reply_to_message) {
+        const replyData = typeof message.reply_to_message === 'string' ? JSON.parse(message.reply_to_message) : message.reply_to_message;
+        replyHtml = `
+            <div class="replied-message">
+                <span class="replied-sender">↩️ ${escapeHtml(replyData.sender || 'Pesan')}</span>
+                <div>${escapeHtml(replyData.text.substring(0, 100))}${replyData.text.length > 100 ? '...' : ''}</div>
+            </div>
+        `;
+    }
+    
+    // Read receipt untuk pesan sendiri
+    const readReceiptHtml = isOwnMessage ? `
+        <div class="read-receipt">
+            ${message.is_read ? '<i class="fas fa-check-double"></i>' : '<i class="fas fa-check"></i>'}
+        </div>
+    ` : '';
+    
     messageDiv.innerHTML = `
         <div class="message-bubble">
             <div class="message-header">
                 <span class="username">${escapeHtml(message.username)}</span>
                 <span class="time">${formatTime(message.created_at)}</span>
+                ${readReceiptHtml}
+                <button class="reply-btn" data-id="${message.id}" data-username="${escapeHtml(message.username)}" data-text="${escapeHtml(displayText.substring(0, 50))}">
+                    <i class="fas fa-reply"></i>
+                </button>
             </div>
+            ${replyHtml}
             <div class="message-content">${escapeHtml(displayText)}</div>
             ${showOriginal && displayText !== message.original_message ? 
                 `<div class="original-message">📝 ${escapeHtml(message.original_message)}</div>` : ''}
         </div>
     `;
     
+    // Event reply button
+    const replyBtn = messageDiv.querySelector('.reply-btn');
+    if (replyBtn) {
+        replyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showReplyPreview(message);
+        });
+    }
+    
+    // Event click untuk select mode
     messageDiv.addEventListener('click', (e) => {
-        if (selectMode) {
+        if (selectMode && !e.target.closest('.reply-btn')) {
             e.stopPropagation();
             toggleMessageSelection(message.id, messageDiv);
         }
@@ -325,6 +458,11 @@ async function renderMessage(message) {
     
     messagesContainer.appendChild(messageDiv);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Mark as read jika pesan dari orang lain
+    if (!isOwnMessage) {
+        await markMessageAsRead(message.id);
+    }
 }
 
 async function loadMessages() {
@@ -351,7 +489,7 @@ async function loadMessages() {
     }
 }
 
-// ============ SEND MESSAGE ============
+// ============ SEND MESSAGE (DENGAN REPLY) ============
 async function sendMessage(messageText) {
     if (!messageText.trim() || !currentUser) return;
     
@@ -360,8 +498,20 @@ async function sendMessage(messageText) {
     const messageData = {
         user_id: currentUser.id,
         username: latestUsername,
-        original_message: messageText.trim()
+        original_message: messageText.trim(),
+        is_delivered: true
     };
+    
+    // Tambah data reply jika ada
+    if (currentReplyTo) {
+        messageData.reply_to_id = currentReplyTo.id;
+        messageData.reply_to_message = JSON.stringify({
+            id: currentReplyTo.id,
+            sender: currentReplyTo.username,
+            text: currentReplyTo.text
+        });
+        cancelReply();
+    }
     
     const { error } = await supabaseClient.from('messages').insert([messageData]);
     if (error) {
@@ -372,12 +522,12 @@ async function sendMessage(messageText) {
 
 let messagesSubscription = null;
 
-// ============ REALTIME SUBSCRIPTION ============
-function setupRealtimeSubscription() {
-    if (messagesSubscription) {
-        messagesSubscription.unsubscribe();
-    }
+// ============ REALTIME SUBSCRIPTION (DENGAN TYPING CHANNEL) ============
+function setupRealtimeSubscriptions() {
+    if (messagesSubscription) messagesSubscription.unsubscribe();
+    if (typingChannel) typingChannel.unsubscribe();
     
+    // Messages channel
     messagesSubscription = supabaseClient
         .channel('messages-channel')
         .on('postgres_changes', 
@@ -391,6 +541,24 @@ function setupRealtimeSubscription() {
                 await renderMessage(payload.new);
             }
         )
+        .on('postgres_changes', 
+            { event: 'UPDATE', schema: 'public', table: 'messages' },
+            () => loadMessages()
+        )
+        .on('postgres_changes', 
+            { event: 'DELETE', schema: 'public', table: 'messages' },
+            () => loadMessages()
+        )
+        .subscribe();
+    
+    // Typing channel
+    typingChannel = supabaseClient.channel('typing-channel');
+    typingChannel
+        .on('broadcast', { event: 'typing' }, (payload) => {
+            if (payload.payload.user_id !== currentUser?.id) {
+                showTypingIndicator(payload.payload.username);
+            }
+        })
         .subscribe();
 }
 
@@ -535,8 +703,9 @@ async function handleLogin(email, password) {
     await loadUserMood();
     await loadMessages();
     await updateAllMessagesUsername();
-    setupRealtimeSubscription();
+    setupRealtimeSubscriptions();
     startOnlineStatusTracking();
+    startLastSeenTracking();
     return true;
 }
 
@@ -566,9 +735,9 @@ async function handleLogout() {
     await supabaseClient.auth.signOut();
     currentUser = null;
     if (onlineStatusInterval) clearInterval(onlineStatusInterval);
-    if (messagesSubscription) {
-        messagesSubscription.unsubscribe();
-    }
+    if (lastSeenInterval) clearInterval(lastSeenInterval);
+    if (messagesSubscription) messagesSubscription.unsubscribe();
+    if (typingChannel) typingChannel.unsubscribe();
     
     const authContainer = document.getElementById('auth-container');
     const chatContainer = document.getElementById('chat-container');
@@ -658,6 +827,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 messageInput.value = '';
             }
         });
+    }
+    
+    // ============ TYPING INDICATOR EVENT ============
+    let typingTimer;
+    if (messageInput) {
+        messageInput.addEventListener('input', () => {
+            clearTimeout(typingTimer);
+            sendTypingIndicator();
+            typingTimer = setTimeout(() => {}, 1000);
+        });
+    }
+    
+    // Cancel reply button
+    const cancelReplyBtn = document.getElementById('cancel-reply');
+    if (cancelReplyBtn) {
+        cancelReplyBtn.addEventListener('click', cancelReply);
     }
     
     // Logout
@@ -888,8 +1073,9 @@ document.addEventListener('DOMContentLoaded', () => {
             loadUserMood();
             loadMessages();
             updateAllMessagesUsername();
-            setupRealtimeSubscription();
+            setupRealtimeSubscriptions();
             startOnlineStatusTracking();
+            startLastSeenTracking();
         }
     });
 });

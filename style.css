@@ -858,3 +858,127 @@ body {
     font-weight: bold;
     color: #667eea;
 }
+/* ============ READ RECEIPT ============ */
+.read-receipt {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    font-size: 11px;
+}
+
+.read-receipt i.fa-check {
+    color: #9aa3af;
+}
+
+.read-receipt i.fa-check-double {
+    color: #34b7f1;
+}
+
+/* ============ REPLY BUTTON ============ */
+.reply-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #9aa3af;
+    font-size: 12px;
+    margin-left: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.message:hover .reply-btn {
+    opacity: 1;
+}
+
+.reply-btn:hover {
+    color: #667eea;
+}
+
+/* ============ REPLIED MESSAGE ============ */
+.replied-message {
+    background: rgba(102, 126, 234, 0.1);
+    border-left: 2px solid #667eea;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.replied-message .replied-sender {
+    font-weight: bold;
+    color: #667eea;
+}
+
+/* ============ REPLY PREVIEW ============ */
+.reply-preview {
+    background: #e9ecef;
+    border-left: 3px solid #667eea;
+    padding: 8px 12px;
+    margin: 0 16px 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.reply-preview-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.reply-preview-content i {
+    color: #667eea;
+}
+
+#reply-preview-text {
+    flex: 1;
+    color: #495057;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cancel-reply-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+/* ============ TYPING INDICATOR ============ */
+.typing-indicator-container {
+    padding: 8px 16px;
+    background: #e9ecef;
+    border-radius: 20px;
+    margin: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #6c757d;
+}
+
+.typing-indicator {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.typing-indicator span {
+    width: 6px;
+    height: 6px;
+    background: #667eea;
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) { animation-delay: 0s; }
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-8px); opacity: 1; }
+}
